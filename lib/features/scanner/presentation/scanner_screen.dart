@@ -1,30 +1,32 @@
 import 'dart:async';
-import 'dart:ui' show ImageFilter;
-import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import 'package:camera/camera.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../../../core/services/ml_kit_service.dart';
-import '../../../core/services/price_validation_service.dart';
-import '../../../core/services/location_service.dart';
+
 import '../../../core/models/cart_item.dart';
-import '../../../core/models/community_price.dart';
-import '../../../core/models/purchase.dart';
+import '../../../core/models/partial_scan_data.dart';
+import '../../../core/services/label_photo_service.dart';
+import '../../../core/services/ml_kit_service.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/somaai_logo.dart';
-import '../../cart/presentation/providers/cart_provider.dart';
-import '../../community_alerts/presentation/providers/alert_preferences_provider.dart';
-import '../../community_alerts/presentation/widgets/price_alert_banner.dart';
-import '../../home/presentation/providers/purchase_history_provider.dart';
 import '../domain/label_scanner_service.dart';
 import '../domain/usecases/process_frame_use_case.dart';
-import 'widgets/camera_preview_widget.dart';
-import 'widgets/bottom_sheet_cart.dart';
-import 'widgets/scan_confirmation_sheet.dart';
 import 'providers/scanner_provider.dart';
+import 'widgets/camera_preview_widget.dart';
+import 'widgets/partial_scan_sheet.dart';
+import 'widgets/scan_confirmation_sheet.dart';
 
+/// Câmera de leitura de etiquetas, aberta sob demanda pelo carrinho.
+///
+/// Regras de performance:
+/// - [ResolutionPreset.medium] é suficiente para OCR e reduz o buffer YUV;
+/// - no máximo 1 frame por segundo é enviado ao ML Kit;
+/// - um frame novo é descartado enquanto `_isProcessing` for `true`;
+/// - ao confirmar um item, voltar ou sair, o stream e o controller são
+///   liberados imediatamente.
 class ScannerScreen extends ConsumerStatefulWidget {
   const ScannerScreen({super.key});
 
@@ -33,70 +35,64 @@ class ScannerScreen extends ConsumerStatefulWidget {
 }
 
 class _ScannerScreenState extends ConsumerState<ScannerScreen>
-    with WidgetsBindingObserver, TickerProviderStateMixin {
+    with WidgetsBindingObserver {
   CameraController? _cameraController;
   MlKitService? _mlKitService;
-  PriceValidationService? _priceValidationService;
-  LocationService? _locationService;
-  ProcessFrameUseCase? _processFrameUseCase;
   LabelScannerService? _labelScannerService;
-  ValidatePriceUseCase? _validatePriceUseCase;
 
-  /// 900 ms between finished frames: enough for ML Kit to keep up without
-  /// heating the phone or draining the battery at 30 fps.
-  static const Duration _frameInterval = Duration(milliseconds: 900);
+  static const Duration _minFrameInterval = Duration(milliseconds: 1000);
 
   bool _isProcessing = false;
-  bool _isStreaming = false;
+  bool _streamActive = false;
   bool _scanPaused = false;
-  bool _showCart = false;
-  CommunityPriceAlert? _currentAlert;
-  Timer? _frameTimer;
+  bool _closing = false;
+  DateTime? _lastProcessedAt;
   String? _cameraError;
-
-  /// Economia acumulada dos alertas vistos nesta compra.
-  double _sessionSavings = 0;
-  final Set<String> _alertedEans = <String>{};
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeServices();
+    _bootstrap();
   }
 
-  Future<void> _initializeServices() async {
+  Future<void> _bootstrap() async {
+    ref.read(scannerProvider.notifier).reset();
+
     try {
       _mlKitService = MlKitService();
-      _locationService = ref.read(locationServiceProvider);
-      _priceValidationService = PriceValidationService(_locationService!);
-      _processFrameUseCase = ProcessFrameUseCase(_mlKitService!);
-      _labelScannerService = LabelScannerService(_processFrameUseCase!);
-      _validatePriceUseCase = ValidatePriceUseCase(_priceValidationService!);
-    } catch (e, stack) {
-      debugPrint('[SomaAí] Falha ao inicializar serviços: $e');
+      final processFrameUseCase = ProcessFrameUseCase(_mlKitService!);
+      _labelScannerService = LabelScannerService(processFrameUseCase);
+    } catch (error, stack) {
+      debugPrint('[SomaAí] Falha ao inicializar serviços: $error');
       debugPrintStack(stackTrace: stack);
       if (mounted) {
-        setState(() => _cameraError =
-            'Não foi possível iniciar os serviços de leitura.\n$e');
+        setState(
+          () => _cameraError =
+              'Não foi possível iniciar os serviços de leitura.\n$error',
+        );
       }
       return;
     }
 
-    await _initializeCamera();
+    if (mounted) await _initializeCamera();
   }
 
   Future<void> _initializeCamera() async {
-    _frameTimer?.cancel();
-    await _cameraController?.dispose();
-    _cameraController = null;
+    if (_closing) return;
 
+    _releaseCamera();
+    if (mounted) setState(() => _cameraError = null);
+
+    CameraController? controller;
     try {
       final permission = await Permission.camera.request();
       if (!permission.isGranted) {
         if (mounted) {
-          setState(() => _cameraError =
-              'Permissão de câmera negada.\nHabilite o acesso nas configurações do app.');
+          setState(
+            () => _cameraError =
+                'Permissão de câmera negada.\nHabilite o acesso nas configurações do app.',
+          );
         }
         return;
       }
@@ -104,110 +100,136 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         if (mounted) {
-          setState(() =>
-              _cameraError = 'Nenhuma câmera disponível neste dispositivo.');
+          setState(
+            () => _cameraError = 'Nenhuma câmera disponível neste dispositivo.',
+          );
         }
         return;
       }
 
       final backCamera = cameras.firstWhere(
-        (c) => c.lensDirection == CameraLensDirection.back,
+        (camera) => camera.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
 
-      _cameraController = CameraController(
+      controller = CameraController(
         backCamera,
-        // Medium is deliberate: OCR only needs readable text, and a smaller
-        // frame keeps the YUV copy + ML Kit well within the frame budget.
+        // Medium is deliberate: OCR only needs readable text and a smaller
+        // buffer keeps the YUV copy + ML Kit within the frame budget.
         ResolutionPreset.medium,
         enableAudio: false,
         imageFormatGroup: ImageFormatGroup.yuv420,
         fps: 15,
       );
 
-      await _cameraController!
-          .initialize()
-          .timeout(const Duration(seconds: 15));
-      await _cameraController!.setFlashMode(FlashMode.off);
+      await controller.initialize().timeout(const Duration(seconds: 15));
+      await controller.setFlashMode(FlashMode.off);
 
-      // ~1 frame per second, processed one at a time.
-      _frameTimer = Timer.periodic(_frameInterval, (_) {
-        _processNextFrame();
-      });
+      if (!mounted || _closing) {
+        await controller.dispose();
+        return;
+      }
 
-      if (mounted) setState(() {});
-    } catch (e) {
+      _cameraController = controller;
+      controller = null; // ownership transferred to the state
+      setState(() {});
+
+      // The stream stays open, but [_onCameraFrame] discards everything except
+      // one frame per second. This avoids the cost of repeatedly starting and
+      // stopping the native image stream.
+      await _startImageStream();
+    } catch (error) {
+      await controller?.dispose();
       if (mounted) {
-        setState(() => _cameraError = 'Falha ao iniciar a câmera:\n$e');
+        setState(() => _cameraError = 'Falha ao iniciar a câmera:\n$error');
       }
     }
   }
 
-  Future<void> _processNextFrame() async {
+  Future<void> _startImageStream() async {
     final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized) return;
-    if (_scanPaused || _isProcessing || _isStreaming) return;
+    if (controller == null ||
+        !controller.value.isInitialized ||
+        _streamActive ||
+        _scanPaused ||
+        _closing) {
+      return;
+    }
 
-    // Só inicia um novo stream quando o anterior já foi encerrado.
-    _isStreaming = true;
-    var receivedFrame = false;
+    _streamActive = true;
     try {
-      await controller.startImageStream((image) {
-        receivedFrame = true;
-        final active = _cameraController;
-        if (active != null && _isStreaming) {
-          _stopStreaming(active);
-        }
-        _processFrame(image);
-      });
-
-      // Defensive: some devices stop delivering frames after a while. Do not
-      // leave the scanner stuck with _isStreaming = true forever.
-      Future.delayed(const Duration(seconds: 2), () {
-        if (!receivedFrame && _isStreaming && mounted) {
-          _isStreaming = false;
-          try {
-            controller.stopImageStream();
-          } catch (_) {
-            // Stream may already be closed.
-          }
-        }
-      });
-    } catch (e) {
-      _isStreaming = false;
-      debugPrint('[SomaAí] Falha ao capturar frame: $e');
+      await controller.startImageStream(_onCameraFrame);
+    } catch (error) {
+      _streamActive = false;
+      debugPrint('[SomaAí] Falha ao abrir stream da câmera: $error');
     }
   }
 
-  Future<void> _stopStreaming(CameraController controller) async {
+  Future<void> _stopImageStream() async {
+    _streamActive = false;
+    final controller = _cameraController;
+    if (controller == null) return;
+
     try {
       await controller.stopImageStream();
-    } catch (e) {
-      debugPrint('[SomaAí] Falha ao parar stream: $e');
-    } finally {
-      _isStreaming = false;
+    } catch (error) {
+      debugPrint('[SomaAí] Falha ao parar stream da câmera: $error');
     }
+  }
+
+  void _onCameraFrame(CameraImage image) {
+    if (!mounted || _closing || _scanPaused || _isProcessing) return;
+
+    final now = DateTime.now();
+    final last = _lastProcessedAt;
+    if (last != null && now.difference(last) < _minFrameInterval) {
+      return;
+    }
+    _lastProcessedAt = now;
+
+    unawaited(_processFrame(image));
   }
 
   Future<void> _processFrame(CameraImage image) async {
-    if (_isProcessing || _scanPaused) return;
+    // Second barrier: the callback may already have been scheduled when a
+    // previous ML Kit call is still in flight.
+    if (_isProcessing || _scanPaused || _closing) return;
+
+    final scanner = _labelScannerService;
+    if (scanner == null) return;
 
     final notifier = ref.read(scannerProvider.notifier);
     _isProcessing = true;
     notifier.setProcessing(true);
 
     CartItem? confirmedItem;
+    PartialScanData? partialData;
     try {
-      final outcome = await _labelScannerService!.scan(image);
+      final outcome = await scanner.scan(image);
       if (!mounted) return;
       confirmedItem = _applyScanOutcome(outcome);
+      partialData = outcome.partialData;
+    } catch (error, stack) {
+      debugPrint('[SomaAí] Erro ao processar frame: $error');
+      debugPrintStack(stackTrace: stack);
     } finally {
       _isProcessing = false;
       if (mounted) notifier.setProcessing(false);
     }
 
-    if (confirmedItem != null && mounted) {
-      await _confirmScannedItem(confirmedItem);
+    if (partialData != null && mounted) {
+      await _completePartialScan(partialData);
+    } else if (confirmedItem != null && mounted) {
+      final photoPath = await _captureLabelPhoto();
+      if (!mounted) {
+        await LabelPhotoService.delete(photoPath);
+        return;
+      }
+      await _confirmScannedItem(
+        photoPath == null
+            ? confirmedItem
+            : confirmedItem.copyWith(photoPath: photoPath),
+      );
     }
   }
 
@@ -229,6 +251,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           candidatePrice: item.unitPrice,
         );
         return item;
+
+      case LabelScanStatus.partialRead:
+        _pauseScanning();
+        HapticFeedback.mediumImpact();
+        notifier.setFeedback(
+          message: outcome.message,
+          candidatePrice: outcome.candidatePrice,
+        );
+        return null;
 
       case LabelScanStatus.candidate:
         notifier.setFeedback(
@@ -262,20 +293,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   void _pauseScanning() {
     if (_scanPaused) return;
     _scanPaused = true;
-    _frameTimer?.cancel();
-    _frameTimer = null;
-    _isStreaming = false;
-    try {
-      _cameraController?.stopImageStream();
-    } catch (_) {
-      // Stream may already be stopped.
-    }
+    _lastProcessedAt = null;
     ref.read(scannerProvider.notifier).setPaused(true);
+    unawaited(_stopImageStream());
   }
 
-  void _resumeScanning() {
-    if (!mounted) return;
+  Future<void> _resumeScanning() async {
+    if (!mounted || _closing) return;
     _scanPaused = false;
+    _lastProcessedAt = null;
     _labelScannerService?.reset();
     ref.read(scannerProvider.notifier)
       ..setPaused(false)
@@ -284,17 +310,73 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
         clearCandidate: true,
       );
 
+    // Make sure the previous stopImageStream() completed before starting a
+    // new native stream. Some devices reject start/stop races.
+    await _stopImageStream();
+    if (!mounted || _closing || _scanPaused) return;
+    await _startImageStream();
+  }
+
+  /// Takes a still photo of the label after a reading is confirmed.
+  ///
+  /// The image stream was already paused. Stopping it explicitly before
+  /// `takePicture` avoids the Android camera races seen when both operations
+  /// overlap. The photo is stored in the app documents directory; if anything
+  /// fails the scan continues without a proof photo.
+  Future<String?> _captureLabelPhoto() async {
     final controller = _cameraController;
-    if (controller == null || !controller.value.isInitialized) return;
-    if (_frameTimer == null || !_frameTimer!.isActive) {
-      _frameTimer = Timer.periodic(_frameInterval, (_) {
-        _processNextFrame();
-      });
+    if (controller == null || !controller.value.isInitialized || _closing) {
+      return null;
+    }
+
+    try {
+      await _stopImageStream();
+      if (!mounted || _closing) return null;
+
+      final shot =
+          await controller.takePicture().timeout(const Duration(seconds: 5));
+      final path = await LabelPhotoService.persistFromFile(shot.path);
+      if (!mounted) {
+        await LabelPhotoService.delete(path);
+        return null;
+      }
+      return path;
+    } catch (error) {
+      debugPrint('[SomaAí] Foto da etiqueta indisponível: $error');
+      return null;
     }
   }
 
-  /// Pauses the camera and asks the user to confirm the value before it is
-  /// added to the cart. This is the final anti-false-positive barrier.
+  /// Opens the complement sheet when the camera read only EAN or price.
+  ///
+  /// The stream was already stopped by [_pauseScanning]. Confirming returns the
+  /// completed item to the cart and closes the scanner; retrying resumes the
+  /// camera without keeping a second controller alive.
+  Future<void> _completePartialScan(PartialScanData data) async {
+    final photoPath = await _captureLabelPhoto();
+    if (!mounted) {
+      await LabelPhotoService.delete(photoPath);
+      return;
+    }
+
+    final item =
+        await showPartialScanSheet(context, data, photoPath: photoPath);
+    if (!mounted) return;
+
+    if (item != null) {
+      _releaseCamera();
+      Navigator.of(context).pop(item);
+      return;
+    }
+
+    await LabelPhotoService.delete(photoPath);
+    _labelScannerService?.reset();
+    await _resumeScanning();
+  }
+
+  /// Pauses the stream and asks the user to confirm the value before it is
+  /// returned to the cart. Confirming closes the scanner immediately; retrying
+  /// resumes the stream without leaving the camera open in the background.
   Future<void> _confirmScannedItem(CartItem item) async {
     final add = await showModalBottomSheet<bool>(
       context: context,
@@ -311,51 +393,66 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     if (!mounted) return;
 
     if (add == true) {
-      ref.read(cartProvider.notifier).addItem(item);
-      unawaited(_checkCommunityAlert(item));
-    } else {
-      // The user rejected the reading: allow the same label to be retried
-      // immediately instead of waiting for the duplicate cooldown.
-      _labelScannerService?.forget(item);
+      _releaseCamera();
+      Navigator.of(context).pop(item);
+      return;
     }
 
-    _resumeScanning();
+    // The user rejected the reading: remove the proof photo and allow the same
+    // label to be retried immediately instead of waiting for the cooldown.
+    await LabelPhotoService.delete(item.photoPath);
+    _labelScannerService?.forget(item);
+    unawaited(_resumeScanning());
   }
 
-  Future<void> _checkCommunityAlert(CartItem item) async {
-    final alertsEnabled = ref.read(alertPreferencesProvider).alertsEnabled;
-    if (!alertsEnabled || item.ean == null) return;
+  /// Releases the native camera before navigating away.
+  ///
+  /// Stops the stream synchronously, then disposes the controller. Both calls
+  /// are idempotent so `dispose()` can safely call this again.
+  void _releaseCamera({bool notify = true}) {
+    final controller = _cameraController;
+    if (controller == null) return;
 
-    final alert = await _validatePriceUseCase?.execute(
-      item: item,
-      currentPrice: item.unitPrice,
-    );
-
-    if (alert != null && mounted) {
-      if (item.ean != null && _alertedEans.add(item.ean!)) {
-        _sessionSavings += alert.savings;
-      }
-      setState(() => _currentAlert = alert);
-      // Auto-dismiss after 8 seconds.
-      Future.delayed(const Duration(seconds: 8), () {
-        if (mounted && _currentAlert == alert) {
-          setState(() => _currentAlert = null);
-        }
-      });
+    // Remove the CameraPreview from the tree on the next frame *before* the
+    // controller is disposed. Otherwise the popping route can rebuild the
+    // preview with an already-disposed controller.
+    if (notify && mounted) {
+      setState(() => _cameraController = null);
+    } else {
+      _cameraController = null;
     }
+    _streamActive = false;
+    _lastProcessedAt = null;
+
+    try {
+      unawaited(controller.stopImageStream());
+    } catch (_) {
+      // Stream may already be stopped.
+    }
+    unawaited(controller.dispose());
+  }
+
+  void _closeScanner() {
+    if (_closing) return;
+    _closing = true;
+    _releaseCamera();
+    Navigator.of(context).maybePop();
+  }
+
+  Future<void> _toggleFlashlight() async {
+    final controller = _cameraController;
+    if (controller == null) return;
+    final mode = controller.value.flashMode == FlashMode.torch
+        ? FlashMode.off
+        : FlashMode.torch;
+    await controller.setFlashMode(mode);
   }
 
   @override
   void dispose() {
-    _frameTimer?.cancel();
-    _isStreaming = false;
+    _closing = true;
+    _releaseCamera(notify: false);
     _labelScannerService?.reset();
-    try {
-      _cameraController?.stopImageStream();
-    } catch (_) {
-      // Controlador pode não ter sido inicializado.
-    }
-    _cameraController?.dispose();
     _mlKitService?.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
@@ -363,36 +460,15 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return;
-    }
-
     switch (state) {
       case AppLifecycleState.paused:
-        _frameTimer?.cancel();
-        _isStreaming = false;
-        try {
-          _cameraController!.stopImageStream();
-        } catch (_) {
-          // Stream may already be stopped.
-        }
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.inactive:
+        unawaited(_stopImageStream());
       case AppLifecycleState.resumed:
-        if (!_scanPaused && (_frameTimer == null || !_frameTimer!.isActive)) {
-          _frameTimer = Timer.periodic(_frameInterval, (_) {
-            _processNextFrame();
-          });
-        }
-      default:
-        break;
-    }
-  }
-
-  void _retryCamera() {
-    setState(() => _cameraError = null);
-    if (_processFrameUseCase == null) {
-      _initializeServices();
-    } else {
-      _initializeCamera();
+        if (!_scanPaused) unawaited(_startImageStream());
+      case AppLifecycleState.detached:
+        _releaseCamera();
     }
   }
 
@@ -402,72 +478,44 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
       return _buildCameraError(context);
     }
 
-    if (_cameraController == null || !_cameraController!.value.isInitialized) {
+    final controller = _cameraController;
+    if (controller == null || !controller.value.isInitialized) {
       return _buildCameraLoading(context);
     }
 
-    final cart = ref.watch(cartProvider);
-    final total = cart.fold(0.0, (sum, item) => sum + item.totalPrice);
-    final itemCount = cart.fold(0, (sum, item) => sum + item.quantity);
     final bottomInset = MediaQuery.of(context).viewPadding.bottom;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          // Câmera em tempo real.
-          Positioned.fill(
-            child: CameraPreviewWidget(controller: _cameraController!),
-          ),
-
-          // Guias de enquadramento.
-          const ScanOverlayWidget(),
-
-          // Barra superior em vidro escuro.
-          SafeArea(
-            child: Column(
-              children: [
-                _buildTopBar(),
-                if (_currentAlert != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(14, 6, 14, 0),
-                    child: PriceAlertBanner(
-                      alert: _currentAlert!,
-                      onDismiss: () => setState(() => _currentAlert = null),
-                      onNavigate: () => _navigateToStore(_currentAlert!),
-                    ),
-                  ),
-              ],
+    return PopScope<Object?>(
+      canPop: true,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) _releaseCamera();
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            Positioned.fill(
+              child: CameraPreviewWidget(controller: controller),
             ),
-          ),
-
-          // Painel de saldo flutuante (glassmorphism claro).
-          Positioned(
-            left: 14,
-            right: 14,
-            bottom: bottomInset + 12,
-            child: _buildBalancePanel(context, cart, total, itemCount),
-          ),
-
-          // Carrinho detalhado (sobrepõe o painel quando aberto).
-          BottomSheetCart(
-            isOpen: _showCart,
-            onToggle: () => setState(() => _showCart = !_showCart),
-            items: cart,
-            total: total,
-            onItemRemoved: (id) =>
-                ref.read(cartProvider.notifier).removeItem(id),
-            onItemQuantityChanged: (id, qty) =>
-                ref.read(cartProvider.notifier).updateQuantity(id, qty),
-            onClearCart: () => ref.read(cartProvider.notifier).clear(),
-            onCheckout: _finishPurchase,
-          ),
-        ],
+            const ScanOverlayWidget(),
+            SafeArea(
+              child: Column(
+                children: [
+                  _buildTopBar(controller),
+                  const Spacer(),
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(18, 0, 18, bottomInset + 16),
+                    child: _buildPerformanceHint(),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ------------------------------------------------------------- Câmera
   Widget _buildCameraLoading(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -479,19 +527,19 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
               left: 6,
               child: IconButton(
                 icon: const Icon(Icons.close_rounded, color: AppTheme.ink),
-                tooltip: 'Voltar',
-                onPressed: () => Navigator.of(context).maybePop(),
+                tooltip: 'Voltar ao carrinho',
+                onPressed: _closeScanner,
               ),
             ),
-            Center(
+            const Center(
               child: Padding(
-                padding: const EdgeInsets.all(28),
+                padding: EdgeInsets.all(28),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const SomaAiLogo(size: 86),
-                    const SizedBox(height: 22),
-                    const Text(
+                    SomaAiLogo(size: 86),
+                    SizedBox(height: 22),
+                    Text(
                       'Preparando a câmera...',
                       style: TextStyle(
                         fontSize: 17,
@@ -499,14 +547,14 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
                         color: AppTheme.ink,
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    const Text(
+                    SizedBox(height: 6),
+                    Text(
                       'Aponte para a etiqueta e veja o total somar.',
                       textAlign: TextAlign.center,
                       style: TextStyle(fontSize: 12.5, color: AppTheme.muted),
                     ),
-                    const SizedBox(height: 24),
-                    const SizedBox(
+                    SizedBox(height: 24),
+                    SizedBox(
                       width: 26,
                       height: 26,
                       child: CircularProgressIndicator(strokeWidth: 3),
@@ -524,11 +572,11 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
   Widget _buildCameraError(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Nova compra'),
+        title: const Text('Ler etiqueta'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          tooltip: 'Voltar',
-          onPressed: () => Navigator.of(context).maybePop(),
+          tooltip: 'Voltar ao carrinho',
+          onPressed: _closeScanner,
         ),
       ),
       body: Center(
@@ -603,17 +651,24 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     );
   }
 
-  Widget _buildTopBar() {
-    final alertsEnabled = ref.watch(alertPreferencesProvider).alertsEnabled;
+  void _retryCamera() {
+    setState(() => _cameraError = null);
+    if (_labelScannerService == null) {
+      _bootstrap();
+    } else {
+      _initializeCamera();
+    }
+  }
 
+  Widget _buildTopBar(CameraController controller) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(14, 10, 14, 6),
       child: Row(
         children: [
           _GlassCircleButton(
             icon: Icons.close_rounded,
-            tooltip: 'Fechar scanner',
-            onTap: () => Navigator.of(context).maybePop(),
+            tooltip: 'Voltar ao carrinho',
+            onTap: _closeScanner,
           ),
           const Spacer(),
           Container(
@@ -634,23 +689,12 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
           ),
           const Spacer(),
           _GlassCircleButton(
-            icon: alertsEnabled
-                ? Icons.notifications_active_rounded
-                : Icons.notifications_off_rounded,
-            tooltip: alertsEnabled ? 'Desativar alertas' : 'Ativar alertas',
-            iconColor: alertsEnabled ? AppTheme.lime : Colors.white70,
-            onTap: () => ref
-                .read(alertPreferencesProvider.notifier)
-                .toggleAlerts(!alertsEnabled),
-          ),
-          const SizedBox(width: 8),
-          _GlassCircleButton(
             icon: Icons.flash_off_rounded,
             tooltip: 'Lanterna',
             onTap: _toggleFlashlight,
             iconBuilder: (context) {
               return ValueListenableBuilder<CameraValue>(
-                valueListenable: _cameraController!,
+                valueListenable: controller,
                 builder: (context, value, _) {
                   final on = value.flashMode == FlashMode.torch;
                   return Icon(
@@ -667,554 +711,32 @@ class _ScannerScreenState extends ConsumerState<ScannerScreen>
     );
   }
 
-  // ------------------------------------------------ Painel de saldo (vidro)
-  Widget _buildBalancePanel(
-    BuildContext context,
-    List<CartItem> cart,
-    double total,
-    int itemCount,
-  ) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 22, sigmaY: 22),
-        child: Container(
-          padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.9),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.75)),
-            boxShadow: AppTheme.floatingShadow,
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'SALDO TOTAL',
-                          style: TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 1.1,
-                            color: AppTheme.muted,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        FittedBox(
-                          fit: BoxFit.scaleDown,
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            Formatters.currency(total),
-                            style: const TextStyle(
-                              fontSize: 34,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -1.2,
-                              color: AppTheme.emeraldDark,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 11,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppTheme.emeraldTint,
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.shopping_basket_rounded,
-                          size: 13,
-                          color: AppTheme.emeraldDark,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '$itemCount ${itemCount == 1 ? 'item' : 'itens'}',
-                          style: const TextStyle(
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700,
-                            color: AppTheme.emeraldDark,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.mic_rounded,
-                      label: 'Voz',
-                      onTap: _openVoiceInput,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.keyboard_rounded,
-                      label: 'Manual',
-                      onTap: _openManualInput,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: _QuickAction(
-                      icon: Icons.shopping_cart_rounded,
-                      label: 'Carrinho',
-                      badge: itemCount,
-                      onTap: () => setState(() => _showCart = true),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-              if (cart.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 4),
-                  child: Text(
-                    'Aponte a câmera para uma etiqueta para começar.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11,
-                      color: AppTheme.muted,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                )
-              else
-                SizedBox(
-                  width: double.infinity,
-                  child: FilledButton.icon(
-                    onPressed: _finishPurchase,
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 54),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                    ),
-                    icon: const Icon(Icons.check_rounded, size: 21),
-                    label: const Text('Finalizar compra'),
-                  ),
-                ),
-            ],
-          ),
-        ),
+  Widget _buildPerformanceHint() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.38),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
       ),
-    );
-  }
-
-  // ------------------------------------------------------------- Compras
-  Future<void> _finishPurchase() async {
-    final cart = ref.read(cartProvider);
-    if (cart.isEmpty) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('Adicione pelo menos um item antes de finalizar.'),
-          ),
-        );
-      return;
-    }
-
-    if (_showCart) setState(() => _showCart = false);
-
-    final storeName = await _askStoreName(cart);
-    if (storeName == null || !mounted) return;
-
-    final trimmed = storeName.trim().isEmpty ? 'Mercado' : storeName.trim();
-    final purchase = Purchase(
-      id: DateTime.now().microsecondsSinceEpoch.toString(),
-      storeName: trimmed,
-      date: DateTime.now(),
-      savings: _sessionSavings,
-      items: cart
-          .map(
-            (item) => PurchaseItem(
-              name: item.name,
-              unit: item.unit,
-              unitPrice: item.unitPrice,
-              quantity: item.quantity,
-            ),
-          )
-          .toList(),
-    );
-
-    final messenger = ScaffoldMessenger.of(context);
-    await ref.read(purchaseHistoryProvider.notifier).addPurchase(purchase);
-    ref.read(cartProvider.notifier).clear();
-
-    if (!mounted) return;
-    Navigator.of(context).maybePop();
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            'Compra em $trimmed salva! Total '
-            '${Formatters.currency(purchase.total)}.',
-          ),
-          duration: const Duration(seconds: 4),
-        ),
-      );
-  }
-
-  Future<String?> _askStoreName(List<CartItem> cart) async {
-    final controller = TextEditingController(text: 'Supermercado');
-    final total = cart.fold(0.0, (sum, item) => sum + item.totalPrice);
-    final itemCount = cart.fold(0, (sum, item) => sum + item.quantity);
-
-    final result = await showDialog<String>(
-      context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          title: const Text('Finalizar compra'),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppTheme.emeraldTint,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.receipt_long_rounded,
-                        color: AppTheme.emeraldDark,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Total da compra',
-                              style: TextStyle(
-                                fontSize: 10.5,
-                                color: AppTheme.emeraldDark,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            Text(
-                              Formatters.currency(total),
-                              style: const TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                                color: AppTheme.emeraldDark,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Text(
-                        '$itemCount ${itemCount == 1 ? 'item' : 'itens'}',
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: AppTheme.emeraldDark,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: controller,
-                  textCapitalization: TextCapitalization.words,
-                  decoration: const InputDecoration(
-                    labelText: 'Onde você comprou?',
-                    hintText: 'Ex.: Extra, Assaí, Carrefour...',
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    'Extra',
-                    'Assaí',
-                    'Carrefour',
-                    'Pão de Açúcar',
-                  ].map((store) {
-                    return ActionChip(
-                      label: Text(store),
-                      onPressed: () => controller.text = store,
-                    );
-                  }).toList(),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancelar'),
-            ),
-            FilledButton.icon(
-              onPressed: () => Navigator.pop(ctx, controller.text),
-              icon: const Icon(Icons.check_rounded, size: 18),
-              label: const Text('Salvar compra'),
-            ),
-          ],
-        );
-      },
-    );
-
-    // Aguarda a animação de saída antes de libertar o controller.
-    Future.delayed(const Duration(milliseconds: 400), controller.dispose);
-    return result;
-  }
-
-  Future<void> _toggleFlashlight() async {
-    if (_cameraController == null) return;
-    final mode = _cameraController!.value.flashMode == FlashMode.torch
-        ? FlashMode.off
-        : FlashMode.torch;
-    await _cameraController!.setFlashMode(mode);
-  }
-
-  void _openVoiceInput() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Entrada por voz - Em desenvolvimento')),
-    );
-  }
-
-  Future<void> _openManualInput() async {
-    final nameController = TextEditingController();
-    final priceController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
-    var quantity = 1;
-
-    final added = await showModalBottomSheet<bool>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            final keyboard = MediaQuery.of(ctx).viewInsets.bottom;
-            return Padding(
-              padding: EdgeInsets.only(bottom: keyboard),
-              child: Container(
-                padding: const EdgeInsets.fromLTRB(24, 14, 24, 28),
-                decoration: const BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.vertical(
-                    top: Radius.circular(AppTheme.radiusXl),
-                  ),
-                ),
-                child: SingleChildScrollView(
-                  child: Form(
-                    key: formKey,
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Center(
-                          child: Container(
-                            width: 44,
-                            height: 5,
-                            decoration: BoxDecoration(
-                              color: AppTheme.line,
-                              borderRadius: BorderRadius.circular(10),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 18),
-                        const Text(
-                          'Adicionar item',
-                          style: TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
-                            color: AppTheme.ink,
-                            letterSpacing: -0.4,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        const Text(
-                          'Digite o produto e o preço da etiqueta.',
-                          style:
-                              TextStyle(fontSize: 12.5, color: AppTheme.muted),
-                        ),
-                        const SizedBox(height: 18),
-                        TextFormField(
-                          controller: nameController,
-                          textCapitalization: TextCapitalization.words,
-                          autofocus: true,
-                          textInputAction: TextInputAction.next,
-                          decoration: const InputDecoration(
-                            labelText: 'Produto',
-                            hintText: 'Ex.: Leite integral 1L',
-                          ),
-                          validator: (value) {
-                            if (value == null || value.trim().isEmpty) {
-                              return 'Informe o nome do produto';
-                            }
-                            return null;
-                          },
-                        ),
-                        const SizedBox(height: 12),
-                        Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: TextFormField(
-                                controller: priceController,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                  decimal: true,
-                                ),
-                                inputFormatters: [
-                                  FilteringTextInputFormatter.allow(
-                                    RegExp(r'[0-9.,]'),
-                                  ),
-                                ],
-                                decoration: const InputDecoration(
-                                  labelText: 'Preço unitário',
-                                  prefixText: r'R$ ',
-                                  hintText: '0,00',
-                                ),
-                                validator: (value) {
-                                  final price = _parsePrice(value ?? '');
-                                  if (price == null || price <= 0) {
-                                    return 'Preço inválido';
-                                  }
-                                  return null;
-                                },
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Container(
-                              height: 56,
-                              decoration: BoxDecoration(
-                                color: AppTheme.background,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: AppTheme.line),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  IconButton(
-                                    tooltip: 'Diminuir quantidade',
-                                    onPressed: quantity > 1
-                                        ? () => setSheetState(() => quantity--)
-                                        : null,
-                                    icon: const Icon(Icons.remove_rounded,
-                                        size: 19),
-                                  ),
-                                  Text(
-                                    '$quantity',
-                                    style: const TextStyle(
-                                      fontSize: 15,
-                                      fontWeight: FontWeight.w800,
-                                      color: AppTheme.ink,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    tooltip: 'Aumentar quantidade',
-                                    onPressed: quantity < 99
-                                        ? () => setSheetState(() => quantity++)
-                                        : null,
-                                    icon:
-                                        const Icon(Icons.add_rounded, size: 19),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 20),
-                        SizedBox(
-                          width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () {
-                              if (!(formKey.currentState?.validate() ??
-                                  false)) {
-                                return;
-                              }
-                              final price = _parsePrice(priceController.text);
-                              if (price == null || price <= 0) return;
-
-                              final item = CartItem(
-                                id: DateTime.now()
-                                    .microsecondsSinceEpoch
-                                    .toString(),
-                                name: nameController.text.trim(),
-                                unitPrice: price,
-                                quantity: quantity,
-                                unit: 'un',
-                                totalPrice: price * quantity,
-                                addedAt: DateTime.now(),
-                                source: ScanSource.manual,
-                              );
-                              ref.read(cartProvider.notifier).addItem(item);
-                              Navigator.pop(ctx, true);
-                            },
-                            icon: const Icon(Icons.add_shopping_cart_rounded,
-                                size: 20),
-                            label: const Text('Adicionar ao carrinho'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+      child: const Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.eco_rounded, color: AppTheme.lime, size: 17),
+          SizedBox(width: 7),
+          Flexible(
+            child: Text(
+              'Modo econômico: uma leitura por segundo.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 11.5,
+                fontWeight: FontWeight.w600,
               ),
-            );
-          },
-        );
-      },
-    );
-
-    if (added == true && mounted) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('Item adicionado ao carrinho.')),
-        );
-    }
-
-    // Só liberta os controllers depois de a folha fechar (e da animação).
-    Future.delayed(const Duration(milliseconds: 400), () {
-      nameController.dispose();
-      priceController.dispose();
-    });
-  }
-
-  /// Aceita "12,90", "12.90", "1.234,56" ou "1234.56".
-  double? _parsePrice(String raw) {
-    var value = raw.replaceAll(RegExp(r'[^0-9,.]'), '');
-    if (value.isEmpty) return null;
-    if (value.contains(',')) {
-      value = value.replaceAll('.', '').replaceAll(',', '.');
-    }
-    return double.tryParse(value);
-  }
-
-  void _navigateToStore(CommunityPriceAlert alert) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-          content:
-              Text('Navegar para ${alert.storeName} - Em desenvolvimento')),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -1225,14 +747,12 @@ class _GlassCircleButton extends StatelessWidget {
   final WidgetBuilder? iconBuilder;
   final String tooltip;
   final VoidCallback onTap;
-  final Color iconColor;
 
   const _GlassCircleButton({
     this.icon,
     this.iconBuilder,
     required this.tooltip,
     required this.onTap,
-    this.iconColor = Colors.white,
   });
 
   @override
@@ -1254,91 +774,10 @@ class _GlassCircleButton extends StatelessWidget {
               child: Center(
                 child: iconBuilder != null
                     ? iconBuilder!(context)
-                    : Icon(icon, color: iconColor, size: 22),
+                    : Icon(icon, color: Colors.white, size: 22),
               ),
             ),
           ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Ação rápida do painel de saldo: ícone grande + rótulo curto.
-class _QuickAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final int? badge;
-
-  const _QuickAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.badge,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      label: label,
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: onTap,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              height: 48,
-              width: double.infinity,
-              decoration: BoxDecoration(
-                color: AppTheme.background,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: AppTheme.line),
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(icon, size: 23, color: AppTheme.emeraldDark),
-                  if (badge != null && badge! > 0)
-                    Positioned(
-                      top: 6,
-                      right: 8,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 5,
-                          vertical: 1,
-                        ),
-                        decoration: BoxDecoration(
-                          color: AppTheme.emerald,
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '$badge',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 9,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 10.5,
-                fontWeight: FontWeight.w600,
-                color: AppTheme.muted,
-              ),
-            ),
-          ],
         ),
       ),
     );

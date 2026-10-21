@@ -159,21 +159,21 @@ class _ScanOverlayPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     final corners = [
-      (Offset(0, 0), Offset(cornerLength, 0), Offset(0, cornerLength)),
+      const (Offset(0, 0), Offset(cornerLength, 0), Offset(0, cornerLength)),
       (
         Offset(size.width, 0),
         Offset(size.width - cornerLength, 0),
-        Offset(size.width, cornerLength)
+        Offset(size.width, cornerLength),
       ),
       (
         Offset(0, size.height),
         Offset(cornerLength, size.height),
-        Offset(0, size.height - cornerLength)
+        Offset(0, size.height - cornerLength),
       ),
       (
         Offset(size.width, size.height),
         Offset(size.width - cornerLength, size.height),
-        Offset(size.width, size.height - cornerLength)
+        Offset(size.width, size.height - cornerLength),
       ),
     ];
 

@@ -36,7 +36,7 @@ class AppBootstrap {
     try {
       await Supabase.initialize(
         url: AppConstants.supabaseUrl,
-        anonKey: AppConstants.supabaseAnonKey,
+        publishableKey: AppConstants.supabaseAnonKey,
       ).timeout(timeout);
 
       debugPrint('[SomaAí] Supabase inicializado com sucesso.');
@@ -45,7 +45,8 @@ class AppBootstrap {
       debugPrint('[SomaAí] Supabase: timeout — seguindo em modo offline.');
     } catch (e, stack) {
       error = e;
-      debugPrint('[SomaAí] Supabase indisponível — seguindo em modo offline: $e');
+      debugPrint(
+          '[SomaAí] Supabase indisponível — seguindo em modo offline: $e');
       debugPrintStack(stackTrace: stack);
     }
   }

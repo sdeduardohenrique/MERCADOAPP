@@ -47,6 +47,48 @@ void main() {
       expect(restored.total, 0);
       expect(restored.items, isEmpty);
     });
+
+    test('item por peso soma o total em kg e conta como uma linha', () {
+      final purchase = Purchase(
+        id: 'kg',
+        storeName: 'Feira',
+        date: DateTime(2026, 10, 21),
+        items: const [
+          PurchaseItem(
+            name: 'Banana',
+            unit: 'kg',
+            unitPrice: 6.99,
+            quantity: 1,
+            weightKg: 0.75,
+          ),
+        ],
+      );
+
+      expect(purchase.total, closeTo(5.2425, 0.001));
+      expect(purchase.itemCount, 1);
+    });
+
+    test('serializa item por peso', () {
+      final original = Purchase(
+        id: 'kg',
+        storeName: 'Feira',
+        date: DateTime(2026, 10, 21),
+        items: const [
+          PurchaseItem(
+            name: 'Banana',
+            unit: 'kg',
+            unitPrice: 6.99,
+            quantity: 1,
+            weightKg: 0.75,
+          ),
+        ],
+      );
+
+      final restored = Purchase.fromJson(original.toJson());
+      expect(restored.items.single.isByWeight, isTrue);
+      expect(restored.items.single.weightKg, closeTo(0.75, 0.001));
+      expect(restored.total, original.total);
+    });
   });
 
   group('Formatters', () {

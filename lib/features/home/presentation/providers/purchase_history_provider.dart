@@ -6,17 +6,22 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/models/purchase.dart';
 import '../../data/demo_purchases.dart';
+import '../../domain/purchase_history_sync_service.dart';
 
 /// Histórico de compras persistido localmente (SharedPreferences).
 ///
 /// No primeiro arranque semeia dados de demonstração para o Dashboard não
 /// nascer vazio. O utilizador pode limpar tudo na aba Perfil.
 class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
-  PurchaseHistoryNotifier() : super(const []) {
+  PurchaseHistoryNotifier({PurchaseHistorySyncService? syncService})
+      : _syncService = syncService ?? PurchaseHistorySyncService(),
+        super(const []) {
     _load();
   }
 
   static const storageKey = 'somaai.purchase_history.v1';
+
+  final PurchaseHistorySyncService _syncService;
 
   bool _loaded = false;
   bool get isLoaded => _loaded;
@@ -45,7 +50,9 @@ class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
       debugPrintStack(stackTrace: stack);
       if (state.isEmpty) state = DemoPurchases.build();
     } finally {
-      _loaded = true;
+      if (mounted) {
+        _loaded = true;
+      }
     }
   }
 
@@ -54,9 +61,43 @@ class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
     await _persist();
   }
 
-  Future<void> removePurchase(String id) async {
-    state = state.where((p) => p.id != id).toList();
+  /// Atualiza a compra local imediatamente e tenta espelhar no Supabase.
+  ///
+  /// A fonte de verdade continua sendo o dispositivo: mesmo sem sessão/rede o
+  /// Dashboard e o total do mês refletem a edição na hora.
+  Future<PurchaseMutationResult> updatePurchase(Purchase purchase) async {
+    final index = state.indexWhere((item) => item.id == purchase.id);
+    if (index < 0) {
+      return const PurchaseMutationResult(
+        PurchaseMutationStatus.skippedLocalOnly,
+      );
+    }
+
+    final updated = [...state];
+    updated[index] = purchase;
+    updated.sort((a, b) => b.date.compareTo(a.date));
+    state = updated;
     await _persist();
+
+    return _syncService.update(purchase);
+  }
+
+  /// Remove localmente e depois tenta apagar no Supabase.
+  ///
+  /// O retorno permite que a UI avise quando a nuvem ficou pendente, sem
+  /// reintroduzir a compra na lista (o utilizador já confirmou a exclusão).
+  Future<PurchaseMutationResult> removePurchase(String id) async {
+    final existed = state.any((purchase) => purchase.id == id);
+    if (!existed) {
+      return const PurchaseMutationResult(
+        PurchaseMutationStatus.skippedLocalOnly,
+      );
+    }
+
+    state = state.where((purchase) => purchase.id != id).toList();
+    await _persist();
+
+    return _syncService.delete(id);
   }
 
   Future<void> clearHistory() async {
@@ -77,7 +118,17 @@ class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
 
 final purchaseHistoryProvider =
     StateNotifierProvider<PurchaseHistoryNotifier, List<Purchase>>((ref) {
-  return PurchaseHistoryNotifier();
+  return PurchaseHistoryNotifier(
+    syncService: ref.watch(purchaseHistorySyncServiceProvider),
+  );
+});
+
+/// Compra atualizada por id, usada pela tela de detalhes após uma edição.
+final purchaseByIdProvider = Provider.family<Purchase?, String>((ref, id) {
+  for (final purchase in ref.watch(purchaseHistoryProvider)) {
+    if (purchase.id == id) return purchase;
+  }
+  return null;
 });
 
 /// Compras do mês corrente.

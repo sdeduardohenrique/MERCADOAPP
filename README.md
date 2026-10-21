@@ -8,9 +8,15 @@ Smart grocery shopping assistant with camera-based price scanning, real-time car
 - **🗣️ Voice Input**: Add items by voice (planned)
 - **⌨️ Manual Entry**: Type items manually
 - **💰 Real-time Cart**: Live total calculation as you scan
-- **🤝 Community Prices**: See if nearby stores have better prices
+- **✏️ Cart Item Editing**: Edit name, price, quantity or weight/sale type from the pencil on each card, with instant subtotal recalculation
+- **📸 Shelf Proof**: The scanner keeps the label photo attached to the item so the price can be proven at the checkout
+- **🎯 Budget Tracker**: Optional maximum budget with remaining amount and a green→yellow→red progress bar
+- **⚖️ Unit or Weight**: Price per unit (`preço unitário × quantidade`) or per kilogram (`preço/kg × peso`) in the add/edit modal
+- **➕ Inline Stepper**: Quick `-`/`+` quantity control without opening the edit modal
+- **📍 Market Identification**: GPS match within 100 m, 5 km fallback list, name search and manual registration — or continue without a market and keep the purchase in personal history
+- **📊 Dashboard Periods**: Spending and savings for this month, last 3 months, this year or a custom date range
+- **🤝 Community Prices**: Real Supabase/PostGIS offers with city or 5/10/20 km radius filters, photo upload, full address, distance and routes via Google Maps/Waze
 - **⚡ Smart Alerts**: Configurable notifications for savings opportunities
-- **📍 Geolocation**: Automatic nearby store detection
 - **⏰ Price Freshness**: 72-hour TTL prevents stale promo data
 
 ## Tech Stack
@@ -24,7 +30,9 @@ Smart grocery shopping assistant with camera-based price scanning, real-time car
 | OCR | Google ML Kit Text Recognition v2 |
 | Barcode | `mobile_scanner` (ZXing) + ML Kit Barcode |
 | Location | `geolocator` + `permission_handler` |
-| Offline | Drift (SQLite) |
+| Photos | `image_picker` + Supabase Storage |
+| Maps | `url_launcher` (Google Maps/Waze) |
+| Offline | Drift (SQLite, planned) |
 | Animations | `flutter_animate` |
 
 ## Architecture
@@ -34,12 +42,14 @@ lib/
 ├── core/
 │   ├── constants/          # App constants
 │   ├── services/           # Camera, ML Kit, Supabase, Location, Price Validation
-│   ├── models/             # CartItem, CommunityPrice, Store, Product
+│   ├── models/             # CartItem, Mercado, CommunityOffer, CommunityPrice, Purchase, Product
 │   ├── utils/              # PriceParser, EanValidator, TextNormalizer
 │   └── theme/              # Material 3 themes (light/dark)
 ├── features/
-│   ├── scanner/            # Camera + OCR + Cart integration
-│   ├── cart/               # Cart state management
+│   ├── home/               # Dashboard, active-cart banner, purchase history
+│   ├── scanner/            # Camera + OCR (opened on demand)
+│   ├── cart/               # Active purchase, cart state and checkout
+│   ├── community/          # Market identification, real community offers, photo upload and routes
 │   └── community_alerts/   # Price alerts & preferences
 └── main.dart               # App entry point
 ```
@@ -80,9 +90,12 @@ Run these migrations in Supabase SQL Editor:
 
 ```sql
 -- See supabase/migrations/ for complete schema
--- Key tables: products, stores, community_prices, profiles
--- RPC functions: find_better_prices_nearby, find_stores_nearby
--- Enable RLS on all tables
+-- Key tables: profiles, mercados (PostGIS), products, community_prices, purchases
+-- RPCs: buscar_mercados_proximos, buscar_mercados_por_nome, criar_mercado,
+--       find_better_prices_nearby, save_purchase_with_items,
+--       listar_ofertas_comunidade, publicar_oferta_comunidade
+-- Storage: public bucket ofertas_storage (JPEG/PNG/WebP, 5 MB limit)
+-- Enable RLS on all tables (anonymous market and offer publication are supported)
 ```
 
 ## Configuration
@@ -160,6 +173,7 @@ This project is configured for AI coding assistants:
 | `CameraService` | Camera initialization, frame streaming, flashlight |
 | `MlKitService` | OCR (Text Recognition v2) + Barcode scanning |
 | `PriceValidationService` | Community price checks with caching |
+| `LabelPhotoService` | Compresses and persists the shelf-label proof photo in the app documents directory |
 | `LocationService` | GPS with caching and permissions |
 | `SupabaseService` | Database operations, auth, storage |
 
@@ -180,10 +194,10 @@ This project is configured for AI coding assistants:
 
 ## Roadmap
 
-- [ ] Phase 1: MVP Core (Camera + OCR + Cart + Sync)
-- [ ] Phase 2: Community Features (Price validation, stores, alerts)
-- [ ] Phase 3: UX Polish (Voice, manual entry, offline-first)
-- [ ] Phase 4: Gamification (Trust score, badges, leaderboards)
+- [x] Phase 1: MVP Core (Camera + OCR + Cart + local history)
+- [x] Phase 2: Market identification + community price schema/PostGIS
+- [ ] Phase 3: Authentication, remote purchase sync and community contributions
+- [ ] Phase 4: Voice input, offline outbox and gamification
 
 ## Contributing
 

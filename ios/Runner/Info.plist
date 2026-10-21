@@ -26,6 +26,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>O SomaAí usa sua localização para identificar o mercado onde você está comprando e mostrar preços da comunidade por perto.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>O SomaAí usa sua localização para identificar o mercado onde você está comprando e mostrar preços da comunidade por perto.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>O SomaAí usa a câmera para ler etiquetas e fotografar ofertas da comunidade.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>O SomaAí acessa suas fotos para publicar imagens de ofertas da comunidade.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>O SomaAí pode salvar fotos de ofertas quando você escolher guardar uma imagem.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

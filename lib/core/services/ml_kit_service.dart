@@ -5,6 +5,7 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_text_recognition/google_mlkit_text_recognition.dart';
 import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import '../models/cart_item.dart';
+import '../models/partial_scan_data.dart';
 import '../utils/price_parser.dart';
 import '../utils/ean_validator.dart';
 
@@ -71,8 +72,39 @@ class MlKitService {
     );
   }
 
+  /// Extracts whatever useful data a frame contains when a complete item could
+  /// not be built (EAN only, price only, or both without a product name).
+  ///
+  /// Returning `null` means the frame had neither a valid barcode nor a
+  /// trustworthy price, so the scanner should simply keep looking.
+  PartialScanData? extractPartialData(ScanResult result) {
+    final ean = _extractBestEan(result.barcodes);
+    final text = result.recognizedText.text;
+
+    // Parse the full item once. When this succeeds, the normal confirmation
+    // flow is used; this method only needs to fill the gaps otherwise.
+    final parsed = PriceParser.parseFromOcr(text);
+    final price = parsed?.unitPrice ?? PriceParser.parsePriceFromOcr(text);
+    final suggestedName =
+        parsed?.name ?? PriceParser.extractProductNameFromOcr(text);
+
+    if (ean == null && price == null) return null;
+
+    return PartialScanData(
+      ean: ean,
+      unitPrice: price,
+      suggestedName: suggestedName,
+      rawText: text,
+    );
+  }
+
   Future<InputImage> _cameraImageToInputImage(CameraImage image) async {
-    final planes = [for (final plane in image.planes) plane.bytes];
+    // The camera plugin may reuse the YUV buffers as soon as the stream
+    // callback returns. Copy them synchronously before any `await` so the
+    // isolate/ML Kit never reads a recycled frame.
+    final planes = [
+      for (final plane in image.planes) Uint8List.fromList(plane.bytes),
+    ];
     final bytesList = planes.length == 1
         ? planes.first
         : await Isolate.run(() => _mergePlanes(planes));

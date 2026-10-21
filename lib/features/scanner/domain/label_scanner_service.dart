@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 
 import '../../../core/models/cart_item.dart';
+import '../../../core/models/partial_scan_data.dart';
 import '../../../core/utils/text_normalizer.dart';
 import 'usecases/process_frame_use_case.dart';
 
@@ -12,8 +13,12 @@ enum LabelScanStatus {
   /// The minimum interval between processed frames has not elapsed.
   throttled,
 
-  /// OCR ran but produced no trustworthy price.
+  /// OCR ran but produced no trustworthy price or barcode.
   noCandidate,
+
+  /// At least one useful field was read (EAN or price), but the item is not
+  /// complete and needs a manual complement before being added to the cart.
+  partialRead,
 
   /// A price was read but still needs a second consecutive confirmation.
   candidate,
@@ -31,6 +36,7 @@ enum LabelScanStatus {
 class LabelScanOutcome {
   final LabelScanStatus status;
   final CartItem? item;
+  final PartialScanData? partialData;
   final double? candidatePrice;
   final String message;
   final String? error;
@@ -38,6 +44,7 @@ class LabelScanOutcome {
   const LabelScanOutcome({
     required this.status,
     this.item,
+    this.partialData,
     this.candidatePrice,
     this.message = 'Aproxime da etiqueta de preço',
     this.error,
@@ -46,6 +53,11 @@ class LabelScanOutcome {
   bool get isConfirmed => status == LabelScanStatus.confirmed && item != null;
 
   bool get hasCandidate => status == LabelScanStatus.candidate;
+
+  bool get hasPartialData =>
+      status == LabelScanStatus.partialRead &&
+      partialData != null &&
+      !partialData!.isEmpty;
 
   static const busy = LabelScanOutcome(
     status: LabelScanStatus.busy,
@@ -77,11 +89,11 @@ class LabelScanOutcome {
 class LabelScannerService {
   LabelScannerService(this._processFrameUseCase);
 
-  /// Minimum time between two frame starts (800–1000 ms window).
+  /// Minimum time between two frame starts (1 frame per second).
   ///
-  /// Slightly below the screen timer (900 ms) so timer jitter never causes an
-  /// extra skipped frame.
-  static const Duration minFrameInterval = Duration(milliseconds: 800);
+  /// The screen also enforces this interval before handing a frame to the
+  /// service; keeping it here protects any other caller.
+  static const Duration minFrameInterval = Duration(milliseconds: 1000);
 
   /// If two equal readings are further apart than this, restart the count.
   static const Duration confirmationWindow = PriceConfirmationGate.window;
@@ -131,6 +143,19 @@ class LabelScannerService {
 
       final item = result.cartItem;
       if (item == null) {
+        final partial = result.partialData;
+        if (partial != null && !partial.isEmpty) {
+          _resetConfirmation();
+          return LabelScanOutcome(
+            status: LabelScanStatus.partialRead,
+            partialData: partial,
+            candidatePrice: partial.unitPrice,
+            message: partial.hasEan && !partial.hasPrice
+                ? 'Código lido. Complete o preço.'
+                : 'Preço lido. Complete o nome.',
+          );
+        }
+
         _resetConfirmation();
         return LabelScanOutcome.noCandidate;
       }

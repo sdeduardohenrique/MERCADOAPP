@@ -3,6 +3,7 @@ import '../../../../core/services/ml_kit_service.dart';
 import '../../../../core/services/price_validation_service.dart';
 import '../../../../core/models/cart_item.dart';
 import '../../../../core/models/community_price.dart';
+import '../../../../core/models/partial_scan_data.dart';
 
 /// Use case for processing camera frames
 class ProcessFrameUseCase {
@@ -29,7 +30,11 @@ class ProcessFrameUseCase {
         );
       }
 
-      return FrameProcessingResult(scanResult: scanResult);
+      final partialData = _mlKitService.extractPartialData(scanResult);
+      return FrameProcessingResult(
+        scanResult: scanResult,
+        partialData: partialData,
+      );
     } catch (e) {
       return FrameProcessingResult(error: e.toString());
     } finally {
@@ -42,17 +47,20 @@ class ProcessFrameUseCase {
 class FrameProcessingResult {
   final bool skipped;
   final CartItem? cartItem;
+  final PartialScanData? partialData;
   final ScanResult? scanResult;
   final String? error;
 
   FrameProcessingResult({
     this.skipped = false,
     this.cartItem,
+    this.partialData,
     this.scanResult,
     this.error,
   });
 
   bool get hasItem => cartItem != null;
+  bool get hasPartialData => partialData != null && !partialData!.isEmpty;
   bool get hasError => error != null;
 }
 

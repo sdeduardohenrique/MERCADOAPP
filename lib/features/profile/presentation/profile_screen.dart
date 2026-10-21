@@ -69,7 +69,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(width: 10),
-                Expanded(
+                const Expanded(
                   child: _StatCard(
                     icon: Icons.favorite_rounded,
                     label: 'Ajudas',
@@ -164,9 +164,9 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   onTap: () => _showSimpleDialog(
                     title: 'Como usar',
                     message: '1. Toque em “Iniciar nova compra”.\n'
-                        '2. Aponte a câmera para a etiqueta do produto.\n'
+                        '2. Adicione itens pela câmera, manual ou voz.\n'
                         '3. Ajuste as quantidades no carrinho.\n'
-                        '4. Toque em “Finalizar compra” para guardar no histórico.',
+                        '4. Toque em “Finalizar Compra” para guardar no histórico.',
                   ),
                 ),
                 const Divider(height: 1, indent: 60),

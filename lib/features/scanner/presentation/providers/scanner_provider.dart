@@ -94,6 +94,11 @@ class ScannerNotifier extends StateNotifier<ScannerState> {
   void clearError() {
     state = state.copyWith(clearError: true);
   }
+
+  /// Resets the transient scanner UI state when the camera screen opens.
+  void reset() {
+    state = const ScannerState();
+  }
 }
 
 /// Provider

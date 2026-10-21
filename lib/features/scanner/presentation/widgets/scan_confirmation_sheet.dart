@@ -101,6 +101,36 @@ class ScanConfirmationSheet extends StatelessWidget {
                   color: AppTheme.muted,
                 ),
               ),
+              if (item.photoPath != null) ...[
+                const SizedBox(height: 10),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.emeraldTint,
+                    borderRadius: BorderRadius.circular(30),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.photo_camera_back_outlined,
+                        size: 15,
+                        color: AppTheme.emeraldDark,
+                      ),
+                      SizedBox(width: 5),
+                      Text(
+                        'Foto da etiqueta guardada',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.emeraldDark,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
               const SizedBox(height: 18),
               SizedBox(
                 width: double.infinity,

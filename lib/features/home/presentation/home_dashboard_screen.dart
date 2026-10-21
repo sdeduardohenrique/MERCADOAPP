@@ -4,21 +4,99 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/purchase.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
+import '../../cart/presentation/active_purchase_screen.dart';
+import '../../cart/presentation/providers/cart_provider.dart';
+import '../../cart/presentation/providers/purchase_budget_provider.dart';
+import '../../cart/presentation/widgets/purchase_budget_sheet.dart';
+import '../../community/presentation/providers/market_provider.dart';
+import '../../community/presentation/widgets/market_selection_sheet.dart';
 import '../../profile/presentation/providers/profile_provider.dart';
-import '../../scanner/presentation/scanner_screen.dart';
+import 'providers/dashboard_period_provider.dart';
 import 'providers/purchase_history_provider.dart';
 import 'purchase_history_screen.dart';
 
 /// Dashboard financeiro e de histórico — primeira tela após o Splash.
 ///
-/// A câmera só é aberta por ação explícita no CTA "Iniciar nova compra".
-class HomeDashboardScreen extends ConsumerWidget {
+/// "Iniciar nova compra" abre o fluxo de identificação do mercado e só libera
+/// o carrinho depois que o utilizador confirma onde está comprando.
+class HomeDashboardScreen extends ConsumerStatefulWidget {
   const HomeDashboardScreen({super.key});
 
-  void _openScanner(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ScannerScreen()),
+  @override
+  ConsumerState<HomeDashboardScreen> createState() =>
+      _HomeDashboardScreenState();
+}
+
+class _HomeDashboardScreenState extends ConsumerState<HomeDashboardScreen> {
+  bool _startingPurchase = false;
+  bool _openingPurchase = false;
+
+  Future<void> _openActivePurchase() async {
+    if (_openingPurchase) return;
+    _openingPurchase = true;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ActivePurchaseScreen()),
     );
+    _openingPurchase = false;
+  }
+
+  Future<void> _startPurchase() async {
+    if (_startingPurchase) return;
+
+    final cart = ref.read(cartProvider);
+
+    // Retomar uma compra já iniciada não pede o mercado novamente. Um carrinho
+    // vazio sempre passa pela identificação, mesmo que exista um mercado
+    // escolhido de uma visita anterior.
+    if (cart.isNotEmpty) {
+      await _openActivePurchase();
+      return;
+    }
+
+    setState(() => _startingPurchase = true);
+    try {
+      final result = await showMarketSelectionSheet(context);
+      if (!mounted || result.action == MarketSelectionAction.dismissed) {
+        return;
+      }
+
+      final market = result.market;
+      if (market == null) {
+        ref.read(selectedMarketProvider.notifier).clear();
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Compra sem mercado: os preços ficarão apenas no seu histórico.',
+              ),
+            ),
+          );
+      } else {
+        ref.read(selectedMarketProvider.notifier).select(market);
+
+        if (!market.isRemoto) {
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Mercado salvo neste dispositivo. A sincronização acontece quando houver conexão.',
+                ),
+              ),
+            );
+        }
+      }
+
+      // Orçamento é opcional e só é perguntado ao iniciar uma compra nova.
+      final budget = await showPurchaseBudgetSheet(context);
+      if (!mounted) return;
+      ref.read(purchaseBudgetProvider.notifier).setBudget(budget?.budget);
+
+      await _openActivePurchase();
+    } finally {
+      if (mounted) setState(() => _startingPurchase = false);
+    }
   }
 
   void _openHistory(BuildContext context) {
@@ -27,14 +105,42 @@ class HomeDashboardScreen extends ConsumerWidget {
     );
   }
 
+  Future<void> _pickCustomPeriod() async {
+    final filter = ref.read(dashboardPeriodProvider);
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2020),
+      lastDate: now,
+      initialDateRange: filter.customRange ??
+          DateTimeRange(
+            start: now.subtract(const Duration(days: 30)),
+            end: now,
+          ),
+      helpText: 'Escolha o período',
+      cancelText: 'Cancelar',
+      saveText: 'Aplicar',
+      confirmText: 'Aplicar',
+      fieldStartLabelText: 'Data inicial',
+      fieldEndLabelText: 'Data final',
+    );
+
+    if (picked == null || !mounted) return;
+    ref.read(dashboardPeriodProvider.notifier).selectCustom(picked);
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final profile = ref.watch(userProfileProvider);
-    final spending = ref.watch(monthlySpendingProvider);
-    final savings = ref.watch(monthlySavingsProvider);
-    final monthPurchases = ref.watch(monthlyPurchasesProvider);
+    final periodFilter = ref.watch(dashboardPeriodProvider);
+    final spending = ref.watch(periodSpendingProvider);
+    final savings = ref.watch(periodSavingsProvider);
+    final periodPurchases = ref.watch(periodPurchasesProvider);
     final recent = ref.watch(recentPurchasesProvider);
-    final month = Formatters.monthName(DateTime.now());
+    final cart = ref.watch(cartProvider);
+    final cartTotal = ref.watch(cartTotalProvider);
+    final cartItems = ref.watch(cartItemCountProvider);
+    final selectedMarket = ref.watch(selectedMarketProvider);
 
     return SafeArea(
       bottom: false,
@@ -46,9 +152,32 @@ class HomeDashboardScreen extends ConsumerWidget {
             initials: profile.initials,
             onNotifications: () => _showNotifications(context),
           ),
+          if (cart.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            _ActiveCartBanner(
+              total: cartTotal,
+              itemCount: cartItems,
+              uniqueItems: cart.length,
+              marketName: selectedMarket?.nome,
+              onContinue: _openActivePurchase,
+            ),
+          ],
           const SizedBox(height: 24),
-          _PrimaryCta(onStart: () => _openScanner(context)),
-          const SizedBox(height: 14),
+          _PrimaryCta(
+            onStart: _startingPurchase ? null : _startPurchase,
+          ),
+          const SizedBox(height: 20),
+          _PeriodSelector(
+            filter: periodFilter,
+            onSelect: (period) {
+              if (period == DashboardPeriod.custom) {
+                _pickCustomPeriod();
+              } else {
+                ref.read(dashboardPeriodProvider.notifier).select(period);
+              }
+            },
+          ),
+          const SizedBox(height: 12),
           IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -58,11 +187,11 @@ class HomeDashboardScreen extends ConsumerWidget {
                     icon: Icons.account_balance_wallet_rounded,
                     iconColor: AppTheme.emerald,
                     iconBackground: AppTheme.emeraldTint,
-                    label: 'Gastos em $month',
+                    label: periodFilter.spendingLabel,
                     value: Formatters.currency(spending),
-                    caption: monthPurchases.length == 1
-                        ? '1 compra'
-                        : '${monthPurchases.length} compras',
+                    caption: periodPurchases.length == 1
+                        ? '1 compra no período'
+                        : '${periodPurchases.length} compras no período',
                     valueColor: AppTheme.ink,
                   ),
                 ),
@@ -91,7 +220,9 @@ class HomeDashboardScreen extends ConsumerWidget {
           ),
           const SizedBox(height: 12),
           if (recent.isEmpty)
-            _EmptyPurchases(onStart: () => _openScanner(context))
+            _EmptyPurchases(
+              onStart: _startingPurchase ? null : _startPurchase,
+            )
           else
             ...recent.map(
               (purchase) => Padding(
@@ -242,9 +373,133 @@ class _IconButton extends StatelessWidget {
   }
 }
 
+// -------------------------------------------------------- Compra em andamento
+/// Indicador de carrinho ativo, exibido acima do CTA principal.
+///
+/// O carrinho vive no Riverpod; voltar ao Dashboard não descarta os itens.
+class _ActiveCartBanner extends StatelessWidget {
+  final double total;
+  final int itemCount;
+  final int uniqueItems;
+  final String? marketName;
+  final VoidCallback onContinue;
+
+  const _ActiveCartBanner({
+    required this.total,
+    required this.itemCount,
+    required this.uniqueItems,
+    required this.onContinue,
+    this.marketName,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Você tem uma compra em andamento. '
+          'Total ${Formatters.currency(total)}. Retomar compra.',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          onTap: onContinue,
+          child: Ink(
+            padding: const EdgeInsets.fromLTRB(16, 14, 14, 14),
+            decoration: BoxDecoration(
+              color: AppTheme.amberTint,
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+              border: Border.all(
+                color: AppTheme.amber.withValues(alpha: 0.22),
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: BoxDecoration(
+                    color: AppTheme.amber.withValues(alpha: 0.16),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
+                  child: const Icon(
+                    Icons.shopping_cart_rounded,
+                    color: Color(0xFFB26B00),
+                    size: 23,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Você tem uma compra em andamento',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          height: 1.2,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '${marketName ?? 'Mercado'} • '
+                        '$itemCount ${itemCount == 1 ? 'item' : 'itens'} '
+                        '(${uniqueItems == 1 ? '1 produto' : '$uniqueItems produtos'}) '
+                        '• ${Formatters.currency(total)}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppTheme.muted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 7,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Retomar',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.emeraldDark,
+                        ),
+                      ),
+                      SizedBox(width: 2),
+                      Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 15,
+                        color: AppTheme.emeraldDark,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ------------------------------------------------------------------- CTA
 class _PrimaryCta extends StatelessWidget {
-  final VoidCallback onStart;
+  final VoidCallback? onStart;
 
   const _PrimaryCta({required this.onStart});
 
@@ -252,7 +507,7 @@ class _PrimaryCta extends StatelessWidget {
   Widget build(BuildContext context) {
     return Semantics(
       button: true,
-      label: 'Iniciar nova compra com a câmera',
+      label: 'Iniciar nova compra',
       child: ClipRRect(
         borderRadius: BorderRadius.circular(AppTheme.radiusXl),
         child: Container(
@@ -329,7 +584,7 @@ class _PrimaryCta extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     Text(
-                      'Aponte a câmera para a etiqueta e acompanhe o total em tempo real.',
+                      'Adicione itens pela câmera, manual ou voz e acompanhe o total em tempo real.',
                       style: TextStyle(
                         color: Colors.white.withValues(alpha: 0.85),
                         fontSize: 13.5,
@@ -349,7 +604,8 @@ class _PrimaryCta extends StatelessWidget {
                             borderRadius: BorderRadius.circular(18),
                           ),
                         ),
-                        icon: const Icon(Icons.photo_camera_rounded, size: 22),
+                        icon:
+                            const Icon(Icons.shopping_basket_rounded, size: 22),
                         label: const Text('Iniciar nova compra'),
                       ),
                     ),
@@ -357,6 +613,140 @@ class _PrimaryCta extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// --------------------------------------------------------------- Período
+class _PeriodSelector extends StatelessWidget {
+  final DashboardPeriodFilter filter;
+  final ValueChanged<DashboardPeriod> onSelect;
+
+  const _PeriodSelector({required this.filter, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    const options = <(DashboardPeriod, String)>[
+      (DashboardPeriod.thisMonth, 'Este mês'),
+      (DashboardPeriod.lastThreeMonths, 'Últimos 3 meses'),
+      (DashboardPeriod.thisYear, 'Este ano'),
+      (DashboardPeriod.custom, 'Personalizado'),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Resumo do período',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w800,
+                  color: AppTheme.ink,
+                ),
+              ),
+            ),
+            if (filter.period == DashboardPeriod.custom)
+              Text(
+                filter.shortLabel,
+                style: const TextStyle(
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                  color: AppTheme.muted,
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        SizedBox(
+          height: 40,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: options.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            itemBuilder: (context, index) {
+              final option = options[index];
+              final selected = filter.period == option.$1;
+              final label = option.$1 == DashboardPeriod.custom &&
+                      filter.customRange != null
+                  ? filter.shortLabel
+                  : option.$2;
+
+              return _PeriodChip(
+                label: label,
+                icon: option.$1 == DashboardPeriod.custom
+                    ? Icons.date_range_rounded
+                    : null,
+                selected: selected,
+                onTap: () => onSelect(option.$1),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PeriodChip extends StatelessWidget {
+  final String label;
+  final IconData? icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _PeriodChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: 'Filtrar por $label',
+      child: Material(
+        color: selected ? AppTheme.emerald : Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(30),
+          onTap: onTap,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(
+                color: selected ? AppTheme.emerald : AppTheme.line,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (icon != null) ...[
+                  Icon(
+                    icon,
+                    size: 14,
+                    color: selected ? Colors.white : AppTheme.muted,
+                  ),
+                  const SizedBox(width: 4),
+                ],
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                    color: selected ? Colors.white : AppTheme.ink,
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -516,7 +906,7 @@ class PurchaseTile extends StatelessWidget {
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => PurchaseDetailScreen(purchase: purchase),
+              builder: (_) => PurchaseDetailScreen(purchaseId: purchase.id),
             ),
           );
         },
@@ -605,7 +995,7 @@ class PurchaseTile extends StatelessWidget {
 
 // ------------------------------------------------------------ Empty state
 class _EmptyPurchases extends StatelessWidget {
-  final VoidCallback onStart;
+  final VoidCallback? onStart;
 
   const _EmptyPurchases({required this.onStart});
 

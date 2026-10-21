@@ -90,6 +90,24 @@ void main() {
     });
   });
 
+  group('Leitura parcial', () {
+    test('extrai preço mesmo sem nome de produto', () {
+      expect(PriceParser.parsePriceFromOcr('R\$ 4,49'), 4.49);
+      expect(PriceParser.parsePriceFromOcr('7891000000001\n12,90'), 12.90);
+    });
+
+    test('não inventa preço quando só existe código de barras', () {
+      expect(PriceParser.parsePriceFromOcr('7891000000001'), isNull);
+    });
+
+    test('extrai nome provável quando só falta o preço', () {
+      final name = PriceParser.extractProductNameFromOcr(
+        'Leite Integral 1L\n7891000000001',
+      );
+      expect(name, contains('Leite'));
+    });
+  });
+
   group('PriceParser.parseFromOcr — falsos positivos rejeitados', () {
     test('rejeita zero e centavos abaixo do mínimo', () {
       expect(PriceParser.parseFromOcr('Leite\nR\$ 0,00'), isNull);

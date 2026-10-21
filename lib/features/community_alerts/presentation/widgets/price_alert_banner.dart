@@ -31,7 +31,7 @@ class PriceAlertBanner extends StatelessWidget {
             gradient: LinearGradient(
               colors: [
                 theme.colorScheme.primary,
-                theme.colorScheme.primary.withOpacity(0.8),
+                theme.colorScheme.primary.withValues(alpha: 0.8),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -39,7 +39,7 @@ class PriceAlertBanner extends StatelessWidget {
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
               BoxShadow(
-                color: theme.colorScheme.primary.withOpacity(0.4),
+                color: theme.colorScheme.primary.withValues(alpha: 0.4),
                 blurRadius: 20,
                 offset: const Offset(0, 8),
               ),
@@ -57,7 +57,7 @@ class PriceAlertBanner extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
+                        color: Colors.white.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: const Icon(
@@ -82,7 +82,7 @@ class PriceAlertBanner extends StatelessWidget {
                           Text(
                             '${alert.storeName} (${alert.storeChain}) • ${alert.distanceKm.toStringAsFixed(1)} km',
                             style: TextStyle(
-                              color: Colors.white.withOpacity(0.85),
+                              color: Colors.white.withValues(alpha: 0.85),
                               fontSize: 12,
                             ),
                           ),
@@ -101,12 +101,14 @@ class PriceAlertBanner extends StatelessWidget {
                   children: [
                     _InfoChip(
                       icon: Icons.attach_money,
-                      label: 'Lá: ${NumberFormat.currency(locale: "pt_BR", symbol: "R\$ ").format(alert.communityPrice)}',
+                      label:
+                          'Lá: ${NumberFormat.currency(locale: "pt_BR", symbol: "R\$ ").format(alert.communityPrice)}',
                     ),
                     const SizedBox(width: 8),
                     _InfoChip(
                       icon: Icons.trending_down,
-                      label: 'Economia: ${NumberFormat.currency(locale: "pt_BR", symbol: "R\$ ").format(alert.savings)} (${alert.savingsPercentage.toStringAsFixed(0)}%)',
+                      label:
+                          'Economia: ${NumberFormat.currency(locale: "pt_BR", symbol: "R\$ ").format(alert.savings)} (${alert.savingsPercentage.toStringAsFixed(0)}%)',
                     ),
                   ],
                 ),
@@ -119,28 +121,28 @@ class PriceAlertBanner extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.verified_user,
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                           size: 14,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           'Confirmado por ${alert.confirmationCount} usuário${alert.confirmationCount != 1 ? 's' : ''}',
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.8),
+                            color: Colors.white.withValues(alpha: 0.8),
                             fontSize: 11,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Icon(
                           Icons.access_time,
-                          color: Colors.white.withOpacity(0.8),
+                          color: Colors.white.withValues(alpha: 0.8),
                           size: 14,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          '${_timeAgo(alert.capturedAt)}',
+                          _timeAgo(alert.capturedAt),
                           style: TextStyle(
-                            color: Colors.white.withOpacity(0.8),
+                            color: Colors.white.withValues(alpha: 0.8),
                             fontSize: 11,
                           ),
                         ),
@@ -186,11 +188,14 @@ class PriceAlertBanner extends StatelessWidget {
                 ),
               ],
             ),
-          ).animate().slideY(
-            begin: -0.3,
-            duration: 300.ms,
-            curve: Curves.easeOutCubic,
-          ).fadeIn(),
+          )
+              .animate()
+              .slideY(
+                begin: -0.3,
+                duration: 300.ms,
+                curve: Curves.easeOutCubic,
+              )
+              .fadeIn(),
         ),
       ),
     );
@@ -216,7 +221,7 @@ class _InfoChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.15),
+        color: Colors.white.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -245,31 +250,32 @@ class CommunityAlertsToggle extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final prefs = ref.watch(alertPreferencesProvider);
-    final theme = Theme.of(context);
-
     return Container(
       decoration: BoxDecoration(
-        color: Colors.black.withOpacity(0.7),
+        color: Colors.black.withValues(alpha: 0.7),
         borderRadius: BorderRadius.circular(24),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            prefs.alertsEnabled ? Icons.notifications_active : Icons.notifications_off,
+            prefs.alertsEnabled
+                ? Icons.notifications_active
+                : Icons.notifications_off,
             color: prefs.alertsEnabled ? Colors.greenAccent : Colors.white54,
             size: 20,
           ),
           const SizedBox(width: 8),
           Switch(
             value: prefs.alertsEnabled,
-            onChanged: (v) => ref.read(alertPreferencesProvider.notifier).toggleAlerts(v),
-            activeColor: Colors.greenAccent,
+            onChanged: (v) =>
+                ref.read(alertPreferencesProvider.notifier).toggleAlerts(v),
+            activeThumbColor: Colors.greenAccent,
             inactiveThumbColor: Colors.grey,
             inactiveTrackColor: Colors.grey.shade800,
           ),
           const SizedBox(width: 8),
-          Text(
+          const Text(
             'Alertas',
             style: TextStyle(color: Colors.white, fontSize: 13),
           ),

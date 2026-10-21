@@ -1,4 +1,4 @@
-/// Text normalization utilities for Portuguese/Brazilian product names
+// Text normalization utilities for Portuguese/Brazilian product names.
 import 'dart:math';
 
 class TextNormalizer {
@@ -35,8 +35,10 @@ class TextNormalizer {
         .replaceAll(RegExp(r'[^\w\s\-.,()/&%]+'), '') // Remove special chars
         .replaceAll(RegExp(r'\s+'), ' ') // Normalize whitespace
         .trim()
-        .replaceAll(RegExp(r'^(?:R\$\s?\d+[.,]\d{2}\s*)+'), '') // Remove leading prices
-        .replaceAll(RegExp(r'\s*(?:R\$\s?)?\d+[.,]\d{2}\s*$'), '') // Remove trailing prices
+        .replaceAll(
+            RegExp(r'^(?:R\$\s?\d+[.,]\d{2}\s*)+'), '') // Remove leading prices
+        .replaceAll(RegExp(r'\s*(?:R\$\s?)?\d+[.,]\d{2}\s*$'),
+            '') // Remove trailing prices
         .replaceAll(RegExp(r'^\d+\s*[xX]\s*'), '') // Remove leading "2x "
         .trim();
   }
@@ -44,19 +46,77 @@ class TextNormalizer {
   /// Extracts potential brand from product name
   static String? extractBrand(String name) {
     final knownBrands = [
-      'Nestlé', 'Coca-Cola', 'Pepsi', 'Ambev', 'Sadia', 'Perdigão',
-      'Qualy', 'Doriana', 'Clight', 'Tang', 'Marmitex', 'Knorr',
-      'Ajinomoto', 'Maggi', 'Vono', 'Arisco', 'Hemmer', 'Camil',
-      'Tio João', 'Prato Fino', 'Namorado', 'Yoki', 'Predilecta',
-      'Quero', 'Elefante', 'Caramuru', 'Ciclo', 'Minerva', 'Friboi',
-      'Swift', 'JBS', 'Marfrig', 'Aurora', 'Cooperativa', 'Itambé',
-      'Piracanjuba', 'Ninho', 'Molico', 'Chandelle', 'Batavo',
-      'Danone', 'Activia', 'Yakult', 'Choco', 'Toddy', 'Nescau',
-      'Garoto', 'Lacta', 'Nestle', 'Cacau Show', 'Kopenhagen',
-      'Bauducco', 'Pullman', 'Wickbold', 'Seven Boys', 'Panco',
-      'Vigor', 'Catupiry', 'Tirolez', 'Polengui', 'Queijos',
-      'Seara', 'Frigorífico', 'Frangosul', 'Doux', 'Copacol',
-      'C.Vale', 'Aurora', 'Languiru', 'Cooperalfa', 'Cooperja',
+      'Nestlé',
+      'Coca-Cola',
+      'Pepsi',
+      'Ambev',
+      'Sadia',
+      'Perdigão',
+      'Qualy',
+      'Doriana',
+      'Clight',
+      'Tang',
+      'Marmitex',
+      'Knorr',
+      'Ajinomoto',
+      'Maggi',
+      'Vono',
+      'Arisco',
+      'Hemmer',
+      'Camil',
+      'Tio João',
+      'Prato Fino',
+      'Namorado',
+      'Yoki',
+      'Predilecta',
+      'Quero',
+      'Elefante',
+      'Caramuru',
+      'Ciclo',
+      'Minerva',
+      'Friboi',
+      'Swift',
+      'JBS',
+      'Marfrig',
+      'Aurora',
+      'Cooperativa',
+      'Itambé',
+      'Piracanjuba',
+      'Ninho',
+      'Molico',
+      'Chandelle',
+      'Batavo',
+      'Danone',
+      'Activia',
+      'Yakult',
+      'Choco',
+      'Toddy',
+      'Nescau',
+      'Garoto',
+      'Lacta',
+      'Nestle',
+      'Cacau Show',
+      'Kopenhagen',
+      'Bauducco',
+      'Pullman',
+      'Wickbold',
+      'Seven Boys',
+      'Panco',
+      'Vigor',
+      'Catupiry',
+      'Tirolez',
+      'Polengui',
+      'Queijos',
+      'Seara',
+      'Frigorífico',
+      'Frangosul',
+      'Doux',
+      'Copacol',
+      'C.Vale',
+      'Aurora',
+      'Languiru',
+      'Cooperalfa',
+      'Cooperja',
     ];
 
     final normalizedName = normalize(name);
@@ -100,7 +160,6 @@ class TextNormalizer {
       case 'ml':
       case 'mililitro':
       case 'mililitros':
-      case 'mililitro':
         return 'ml';
       case 'cx':
       case 'caixa':

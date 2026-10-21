@@ -77,6 +77,21 @@ class Formatters {
           .format(value)
           .trim();
 
+  /// 500 g · 1 kg · 1,25 kg
+  static String weight(double kg) {
+    final grams = (kg * 1000).round();
+    if (grams > 0 && grams < 1000) return '$grams g';
+
+    final value = grams / 1000;
+    if (value == value.roundToDouble()) return '${value.toInt()} kg';
+
+    return '${value.toStringAsFixed(3).replaceAll('.', ',').replaceFirst(RegExp(r'0+$'), '')} kg';
+  }
+
+  /// 1,000 (used by weight inputs)
+  static String weightInput(double kg) =>
+      kg.toStringAsFixed(3).replaceAll('.', ',');
+
   /// 12% (sem casas decimais quando inteiro)
   static String percent(double value) {
     final rounded = value.roundToDouble();

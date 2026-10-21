@@ -58,9 +58,17 @@ class CommunityPriceAlert extends Equatable {
 
   @override
   List<Object?> get props => [
-    productName, storeName, storeChain, communityPrice, unitPrice,
-    distanceKm, capturedAt, confirmationCount, savings, savingsPercentage,
-  ];
+        productName,
+        storeName,
+        storeChain,
+        communityPrice,
+        unitPrice,
+        distanceKm,
+        capturedAt,
+        confirmationCount,
+        savings,
+        savingsPercentage,
+      ];
 }
 
 /// Store/Supermarket model
@@ -86,16 +94,27 @@ class Store extends Equatable {
   });
 
   factory Store.fromJson(Map<String, dynamic> json) {
+    final lat = _asDouble(json['latitude']);
+    final lng = _asDouble(json['longitude']);
     return Store(
       id: json['id'] as String,
-      name: json['name'] as String,
+      name: (json['name'] ?? json['nome'] ?? 'Mercado') as String,
       chain: json['chain'] as String?,
-      latitude: (json['latitude'] as num).toDouble(),
-      longitude: (json['longitude'] as num).toDouble(),
-      address: json['address'] as String?,
-      verified: json['verified'] as bool? ?? false,
-      createdAt: DateTime.parse(json['created_at'] as String),
+      latitude: lat ?? 0,
+      longitude: lng ?? 0,
+      address: (json['address'] ?? json['endereco']) as String?,
+      verified: (json['verified'] ?? json['verificado'] ?? false) as bool,
+      createdAt: DateTime.tryParse(
+            (json['created_at'] ?? json['criado_em'] ?? '') as String,
+          ) ??
+          DateTime.now(),
     );
+  }
+
+  static double? _asDouble(dynamic value) {
+    if (value == null) return null;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString());
   }
 
   Map<String, dynamic> toJson() {
@@ -113,8 +132,15 @@ class Store extends Equatable {
 
   @override
   List<Object?> get props => [
-    id, name, chain, latitude, longitude, address, verified, createdAt,
-  ];
+        id,
+        name,
+        chain,
+        latitude,
+        longitude,
+        address,
+        verified,
+        createdAt,
+      ];
 }
 
 /// Product catalog model

@@ -126,16 +126,16 @@ class AppErrorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Directionality(
+    return const Directionality(
       textDirection: TextDirection.ltr,
       child: ColoredBox(
-        color: const Color(0xFF121212),
+        color: Color(0xFF121212),
         child: Center(
           child: Padding(
-            padding: const EdgeInsets.all(24),
+            padding: EdgeInsets.all(24),
             child: Column(
               mainAxisSize: MainAxisSize.min,
-              children: const [
+              children: [
                 Icon(Icons.error_outline, color: Colors.white70, size: 48),
                 SizedBox(height: 12),
                 Text(

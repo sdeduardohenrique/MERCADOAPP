@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/cart_item.dart';
@@ -70,7 +71,7 @@ class PriceValidationService {
       }
 
       // Find best alert (lowest unit price with actual savings)
-      final alerts = (response as List)
+      final alerts = response
           .map((e) => CommunityPriceAlert.fromRpc(e as Map<String, dynamic>))
           .where((alert) => alert.savings > 0.01)
           .toList();
@@ -92,7 +93,7 @@ class PriceValidationService {
       return bestAlert;
     } catch (e) {
       // Log error but don't break UX
-      print('PriceValidationService error: $e');
+      debugPrint('PriceValidationService error: $e');
       _cacheResult(cacheKey, null);
       return null;
     }
@@ -160,7 +161,7 @@ class PriceValidationService {
 
       return true;
     } catch (e) {
-      print('Submit community price error: $e');
+      debugPrint('Submit community price error: $e');
       return false;
     }
   }
@@ -175,7 +176,8 @@ class PriceValidationService {
         .limit(5);
 
     for (final r in results) {
-      final similarity = _calculateSimilarity(normalized, TextNormalizer.normalize(r['name'] as String));
+      final similarity = _calculateSimilarity(
+          normalized, TextNormalizer.normalize(r['name'] as String));
       if (similarity > 0.85) return r['id'] as String;
     }
 
@@ -226,11 +228,6 @@ class PriceValidationService {
     _cache[key] = CachedAlert(alert: alert, timestamp: DateTime.now());
   }
 
-  /// Checks if cached result is still valid
-  bool _isCacheValid(CachedAlert cached) {
-    return DateTime.now().difference(cached.timestamp) < _cacheTtl;
-  }
-
   /// Invalidates cache entries for a specific EAN
   void _invalidateCacheForEan(String ean) {
     _cache.removeWhere((key, _) => key.startsWith('$ean-'));
@@ -248,7 +245,8 @@ class CachedAlert {
 
   CachedAlert({required this.alert, required this.timestamp});
 
-  bool get isValid => DateTime.now().difference(timestamp) < PriceValidationService._cacheTtl;
+  bool get isValid =>
+      DateTime.now().difference(timestamp) < PriceValidationService._cacheTtl;
 }
 
 /// Riverpod provider

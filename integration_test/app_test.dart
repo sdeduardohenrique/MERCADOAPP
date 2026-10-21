@@ -9,7 +9,8 @@ void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
   group('SomaAí - Integration Tests', () {
-    testWidgets('App launches and shows scanner screen', (WidgetTester tester) async {
+    testWidgets('App launches and shows scanner screen',
+        (WidgetTester tester) async {
       app.main();
 
       // A splash anima indefinidamente (CircularProgressIndicator), então não
@@ -23,7 +24,8 @@ void main() {
       expect(find.byType(ScanOverlayWidget), findsOneWidget);
     });
 
-    testWidgets('Cart bottom sheet opens and closes', (WidgetTester tester) async {
+    testWidgets('Cart bottom sheet opens and closes',
+        (WidgetTester tester) async {
       app.main();
       await tester.pump();
       await tester.pump(const Duration(seconds: 2));

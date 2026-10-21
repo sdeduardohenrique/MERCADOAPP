@@ -1,134 +1,16 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shimmer/shimmer.dart';
 
+import '../../../core/models/community_offer.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
-import '../../profile/presentation/providers/profile_provider.dart';
-
-/// Oferta comunitária (mock estruturado).
-///
-/// No futuro estes campos vêm do Supabase/PostGIS:
-/// `product_name`, `store_name`, `store_chain`, `price`, `old_price`,
-/// `distance_km`, `confirmation_count`, `created_at`, `contributor_name`.
-class CommunityOffer {
-  final String id;
-  final String productName;
-  final String storeName;
-  final String storeChain;
-  final String unit;
-  final double price;
-  final double oldPrice;
-  final double distanceKm;
-  final int confirmations;
-  final String contributor;
-  final Duration age;
-
-  const CommunityOffer({
-    required this.id,
-    required this.productName,
-    required this.storeName,
-    required this.storeChain,
-    required this.unit,
-    required this.price,
-    required this.oldPrice,
-    required this.distanceKm,
-    required this.confirmations,
-    required this.contributor,
-    required this.age,
-  });
-
-  double get savings => oldPrice > price ? oldPrice - price : 0;
-
-  double get savingsPercentage =>
-      oldPrice <= 0 ? 0 : (savings / oldPrice) * 100;
-
-  String get ageLabel {
-    if (age.inMinutes < 60) return 'há ${age.inMinutes} min';
-    if (age.inHours < 24) return 'há ${age.inHours}h';
-    return 'há ${age.inDays} dias';
-  }
-}
-
-const _mockOffers = <CommunityOffer>[
-  CommunityOffer(
-    id: 'offer-1',
-    productName: 'Leite integral 1L',
-    storeName: 'Mercado do Bairro',
-    storeChain: 'Rede Local',
-    unit: 'un',
-    price: 3.89,
-    oldPrice: 5.49,
-    distanceKm: 0.8,
-    confirmations: 34,
-    contributor: 'Ana Paula',
-    age: Duration(hours: 2, minutes: 20),
-  ),
-  CommunityOffer(
-    id: 'offer-2',
-    productName: 'Arroz branco 5kg',
-    storeName: 'Assaí Atacadista',
-    storeChain: 'Assaí',
-    unit: 'un',
-    price: 24.90,
-    oldPrice: 31.90,
-    distanceKm: 2.4,
-    confirmations: 51,
-    contributor: 'Carlos Souza',
-    age: Duration(hours: 5),
-  ),
-  CommunityOffer(
-    id: 'offer-3',
-    productName: 'Café torrado 500g',
-    storeName: 'Supermercado Extra',
-    storeChain: 'Extra',
-    unit: 'un',
-    price: 15.99,
-    oldPrice: 21.90,
-    distanceKm: 1.2,
-    confirmations: 27,
-    contributor: 'Marina Lima',
-    age: Duration(hours: 8, minutes: 10),
-  ),
-  CommunityOffer(
-    id: 'offer-4',
-    productName: 'Frango inteiro (kg)',
-    storeName: 'Carrefour',
-    storeChain: 'Carrefour',
-    unit: 'kg',
-    price: 12.49,
-    oldPrice: 16.90,
-    distanceKm: 3.1,
-    confirmations: 19,
-    contributor: 'João Pedro',
-    age: Duration(hours: 12),
-  ),
-  CommunityOffer(
-    id: 'offer-5',
-    productName: 'Banana prata (kg)',
-    storeName: 'Hortifruti da Praça',
-    storeChain: 'Local',
-    unit: 'kg',
-    price: 3.99,
-    oldPrice: 6.99,
-    distanceKm: 0.4,
-    confirmations: 42,
-    contributor: 'Bete Alves',
-    age: Duration(days: 1, hours: 3),
-  ),
-  CommunityOffer(
-    id: 'offer-6',
-    productName: 'Detergente 500ml',
-    storeName: 'Pão de Açúcar',
-    storeChain: 'Pão de Açúcar',
-    unit: 'un',
-    price: 2.29,
-    oldPrice: 3.49,
-    distanceKm: 1.9,
-    confirmations: 15,
-    contributor: 'Rafa Nunes',
-    age: Duration(days: 1, hours: 9),
-  ),
-];
+import '../domain/community_service.dart';
+import 'providers/community_filter_provider.dart';
+import 'widgets/community_location_sheet.dart';
+import 'widgets/community_offer_details_sheet.dart';
+import 'widgets/offer_contribution_sheet.dart';
 
 class CommunityScreen extends ConsumerStatefulWidget {
   const CommunityScreen({super.key});
@@ -140,140 +22,310 @@ class CommunityScreen extends ConsumerStatefulWidget {
 class _CommunityScreenState extends ConsumerState<CommunityScreen> {
   int _filter = 0;
 
-  List<CommunityOffer> get _offers {
-    final list = [..._mockOffers];
+  Future<void> _openLocation() async {
+    final current = ref.read(communityFilterProvider);
+    final selected = await showCommunityLocationSheet(
+      context,
+      current: current,
+    );
+    if (!mounted || selected == null) return;
+    ref.read(communityFilterProvider.notifier).apply(selected);
+  }
+
+  Future<void> _openContribution() async {
+    final published = await showOfferContributionSheet(context);
+    if (!mounted || published != true) return;
+
+    ref.invalidate(communityOffersProvider);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text('Oferta publicada! Obrigado por ajudar a vizinhança.'),
+        ),
+      );
+  }
+
+  Future<void> _refresh() async {
+    ref.invalidate(communityOffersProvider);
+    try {
+      await ref.read(communityOffersProvider.future);
+    } catch (_) {
+      // O estado de erro é renderizado pelo próprio provider.
+    }
+  }
+
+  void _selectFilter(int index) {
+    final current = ref.read(communityFilterProvider);
+
+    if (index == 2) {
+      if (current.hasCity && current.hasCoordinates) {
+        ref.read(communityFilterProvider.notifier).useNearby(
+              latitude: current.latitude!,
+              longitude: current.longitude!,
+              radiusKm: current.radiusKm,
+            );
+      } else if (!current.hasCoordinates) {
+        _openLocation();
+      }
+    }
+
+    setState(() => _filter = index);
+  }
+
+  List<CommunityOffer> _sorted(List<CommunityOffer> source) {
+    final list = [...source];
     switch (_filter) {
       case 1:
-        list.sort((a, b) => b.savingsPercentage.compareTo(a.savingsPercentage));
+        list.sort((a, b) {
+          final byDiscount = b.savingsPercentage.compareTo(a.savingsPercentage);
+          if (byDiscount != 0) return byDiscount;
+          return b.capturedAt.compareTo(a.capturedAt);
+        });
         return list;
       case 2:
-        list.retainWhere((o) => o.distanceKm <= 2);
-        list.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+        list.sort((a, b) {
+          final aDistance = a.distanceKm;
+          final bDistance = b.distanceKm;
+          if (aDistance == null && bDistance == null) {
+            return b.capturedAt.compareTo(a.capturedAt);
+          }
+          if (aDistance == null) return 1;
+          if (bDistance == null) return -1;
+          return aDistance.compareTo(bDistance);
+        });
         return list;
       default:
-        list.sort((a, b) => a.age.compareTo(b.age));
+        list.sort((a, b) => b.capturedAt.compareTo(a.capturedAt));
         return list;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final profile = ref.watch(userProfileProvider);
+    final offersAsync = ref.watch(communityOffersProvider);
+    final filter = ref.watch(communityFilterProvider);
+    final offers = _sorted(offersAsync.valueOrNull ?? const []);
+    final firstLoad = offersAsync.isLoading && !offersAsync.hasValue;
+    final showSkeleton = firstLoad;
+    final error = offersAsync.hasError ? offersAsync.error : null;
+    final showError = error != null && !offersAsync.hasValue;
 
     return SafeArea(
       bottom: false,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Radar de ofertas',
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontSize: 24,
-                                fontWeight: FontWeight.w800,
-                              ),
-                    ),
-                    const SizedBox(height: 2),
-                    const Text(
-                      'Preços achados pela comunidade perto de você.',
-                      style: TextStyle(fontSize: 13, color: AppTheme.muted),
-                    ),
-                  ],
-                ),
-              ),
-              Container(
-                width: 46,
-                height: 46,
-                decoration: const BoxDecoration(
-                  color: AppTheme.amberTint,
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.radar_rounded,
-                  color: Color(0xFFB26B00),
-                  size: 24,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: AppTheme.line),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
+      child: RefreshIndicator(
+        onRefresh: _refresh,
+        color: AppTheme.emerald,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
+          children: [
+            Row(
               children: [
-                const Icon(
-                  Icons.near_me_rounded,
-                  size: 15,
-                  color: AppTheme.emerald,
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Radar de ofertas',
+                        style:
+                            Theme.of(context).textTheme.headlineSmall?.copyWith(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                      ),
+                      const SizedBox(height: 2),
+                      const Text(
+                        'Preços achados pela comunidade perto de você.',
+                        style: TextStyle(fontSize: 13, color: AppTheme.muted),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  profile.city,
-                  style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.ink,
+                Container(
+                  width: 46,
+                  height: 46,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.amberTint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(
+                    Icons.radar_rounded,
+                    color: Color(0xFFB26B00),
+                    size: 24,
                   ),
                 ),
               ],
             ),
-          ),
-          const SizedBox(height: 18),
-          const _CommunityImpactCard(),
-          const SizedBox(height: 18),
-          SizedBox(
-            height: 44,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+            const SizedBox(height: 14),
+            _LocationPill(
+              filter: filter,
+              resolving: false,
+              onTap: _openLocation,
+            ),
+            const SizedBox(height: 16),
+            _CommunityImpactCard(
+              offers: offers,
+              loading: showSkeleton,
+              online: !showError,
+            ),
+            const SizedBox(height: 18),
+            SizedBox(
+              height: 44,
+              child: ListView(
+                scrollDirection: Axis.horizontal,
+                children: [
+                  _FilterChip(
+                    label: 'Recentes',
+                    icon: Icons.schedule_rounded,
+                    selected: _filter == 0,
+                    onTap: () => _selectFilter(0),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Descontos',
+                    icon: Icons.local_fire_department_rounded,
+                    selected: _filter == 1,
+                    onTap: () => _selectFilter(1),
+                  ),
+                  const SizedBox(width: 8),
+                  _FilterChip(
+                    label: 'Perto de mim',
+                    icon: Icons.near_me_rounded,
+                    selected: _filter == 2,
+                    onTap: () => _selectFilter(2),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (showSkeleton)
+              const _OffersLoading()
+            else if (showError)
+              _CommunityError(
+                message: _errorMessage(error),
+                onRetry: _refresh,
+              )
+            else if (offers.isEmpty)
+              _EmptyOffers(onContribute: _openContribution)
+            else
+              ...offers.map(
+                (offer) => Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: _OfferCard(
+                    offer: offer,
+                    onTap: () => showCommunityOfferDetails(context, offer),
+                  ),
+                ),
+              ),
+            const SizedBox(height: 8),
+            _ContributeCard(onTap: _openContribution),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _errorMessage(Object? error) {
+    if (error is CommunityServiceException) return error.message;
+    return 'Não foi possível carregar as ofertas da comunidade agora.';
+  }
+}
+
+class _LocationPill extends StatelessWidget {
+  final CommunityFilter filter;
+  final bool resolving;
+  final VoidCallback onTap;
+
+  const _LocationPill({
+    required this.filter,
+    required this.resolving,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      button: true,
+      label: 'Região: ${filter.label}. Alterar localização ou raio de busca.',
+      child: Material(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(30),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(30),
+          onTap: resolving ? null : onTap,
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(12, 9, 10, 9),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: AppTheme.line),
+            ),
+            child: Row(
               children: [
-                _FilterChip(
-                  label: 'Mais recentes',
-                  icon: Icons.schedule_rounded,
-                  selected: _filter == 0,
-                  onTap: () => setState(() => _filter = 0),
+                Container(
+                  width: 30,
+                  height: 30,
+                  decoration: const BoxDecoration(
+                    color: AppTheme.emeraldTint,
+                    shape: BoxShape.circle,
+                  ),
+                  child: resolving
+                      ? const Padding(
+                          padding: EdgeInsets.all(8),
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(
+                          Icons.near_me_rounded,
+                          size: 16,
+                          color: AppTheme.emeraldDark,
+                        ),
                 ),
                 const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'Maiores descontos',
-                  icon: Icons.local_fire_department_rounded,
-                  selected: _filter == 1,
-                  onTap: () => setState(() => _filter = 1),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        resolving ? 'Obtendo sua localização...' : filter.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      Text(
+                        filter.subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          color: AppTheme.muted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                const SizedBox(width: 8),
-                _FilterChip(
-                  label: 'Perto de mim',
-                  icon: Icons.near_me_rounded,
-                  selected: _filter == 2,
-                  onTap: () => setState(() => _filter = 2),
+                const SizedBox(width: 4),
+                const Text(
+                  'Alterar',
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w800,
+                    color: AppTheme.emeraldDark,
+                  ),
+                ),
+                const Icon(
+                  Icons.chevron_right_rounded,
+                  size: 18,
+                  color: AppTheme.emeraldDark,
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 16),
-          if (_offers.isEmpty)
-            const _EmptyOffers()
-          else
-            ..._offers.map(
-              (offer) => Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _OfferCard(offer: offer),
-              ),
-            ),
-          const SizedBox(height: 8),
-          const _ContributeCard(),
-        ],
+        ),
       ),
     );
   }
@@ -337,10 +389,24 @@ class _FilterChip extends StatelessWidget {
 }
 
 class _CommunityImpactCard extends StatelessWidget {
-  const _CommunityImpactCard();
+  final List<CommunityOffer> offers;
+  final bool loading;
+  final bool online;
+
+  const _CommunityImpactCard({
+    required this.offers,
+    required this.loading,
+    required this.online,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final savings = offers.fold<double>(
+      0,
+      (sum, offer) => sum + offer.savings,
+    );
+    final showValue = online && !loading;
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -363,32 +429,43 @@ class _CommunityImpactCard extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          const Expanded(
+          Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Economia da comunidade',
+                const Text(
+                  'Economia mapeada',
                   style: TextStyle(
                     color: Colors.white70,
                     fontSize: 11.5,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  r'R$ 4.280,00',
-                  style: TextStyle(
+                  showValue ? Formatters.currency(savings) : '—',
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.6,
                   ),
                 ),
-                SizedBox(height: 2),
+                const SizedBox(height: 2),
                 Text(
-                  'nesta semana, em 1.204 contribuições',
-                  style: TextStyle(color: Colors.white54, fontSize: 10.5),
+                  !online
+                      ? 'Radar temporariamente offline'
+                      : loading
+                          ? 'Buscando ofertas ativas...'
+                          : offers.isEmpty
+                              ? 'Nenhuma oferta ativa nesta região'
+                              : offers.length == 1
+                                  ? 'em 1 oferta ativa'
+                                  : 'em ${offers.length} ofertas ativas',
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 10.5,
+                  ),
                 ),
               ],
             ),
@@ -396,15 +473,16 @@ class _CommunityImpactCard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: AppTheme.emeraldBright,
+              color: online ? AppTheme.emeraldBright : AppTheme.amber,
               borderRadius: BorderRadius.circular(20),
             ),
-            child: const Text(
-              '+18%',
-              style: TextStyle(
+            child: Text(
+              online ? 'AO VIVO' : 'OFFLINE',
+              style: const TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w800,
-                fontSize: 11,
+                fontSize: 9.5,
+                letterSpacing: 0.5,
               ),
             ),
           ),
@@ -416,8 +494,9 @@ class _CommunityImpactCard extends StatelessWidget {
 
 class _OfferCard extends StatefulWidget {
   final CommunityOffer offer;
+  final VoidCallback onTap;
 
-  const _OfferCard({required this.offer});
+  const _OfferCard({required this.offer, required this.onTap});
 
   @override
   State<_OfferCard> createState() => _OfferCardState();
@@ -448,218 +527,364 @@ class _OfferCardState extends State<_OfferCard> {
   @override
   Widget build(BuildContext context) {
     final offer = widget.offer;
-    final initials = offer.contributor
-        .trim()
-        .split(RegExp(r'\s+'))
-        .map((p) => p.substring(0, 1))
-        .take(2)
-        .join()
-        .toUpperCase();
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
+    return Semantics(
+      button: true,
+      label: '${offer.productName}, ${Formatters.currency(offer.price)} '
+          'no ${offer.marketName}. Toque para ver detalhes e rota.',
+      child: Material(
         color: Colors.white,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.line),
-        boxShadow: AppTheme.softShadow,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(
-                child: Column(
+        child: InkWell(
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          onTap: widget.onTap,
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+              border: Border.all(color: AppTheme.line),
+              boxShadow: AppTheme.softShadow,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      offer.productName,
-                      style: const TextStyle(
-                        fontSize: 15.5,
-                        fontWeight: FontWeight.w800,
-                        color: AppTheme.ink,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        const Icon(
-                          Icons.storefront_rounded,
-                          size: 14,
-                          color: AppTheme.muted,
-                        ),
-                        const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            '${offer.storeName} • ${offer.storeChain}',
-                            maxLines: 1,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            offer.productName,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              fontSize: 11.5,
-                              color: AppTheme.muted,
-                              fontWeight: FontWeight.w500,
+                              fontSize: 15.5,
+                              height: 1.25,
+                              fontWeight: FontWeight.w800,
+                              color: AppTheme.ink,
+                              letterSpacing: -0.2,
+                            ),
+                          ),
+                          if (offer.brand != null) ...[
+                            const SizedBox(height: 2),
+                            Text(
+                              offer.brand!,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: AppTheme.muted,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              const Icon(
+                                Icons.storefront_rounded,
+                                size: 14,
+                                color: AppTheme.muted,
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  offer.marketLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppTheme.muted,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (offer.hasImage) ...[
+                      const SizedBox(width: 10),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(13),
+                        child: SizedBox(
+                          width: 64,
+                          height: 64,
+                          child: CachedNetworkImage(
+                            imageUrl: offer.imageUrl!,
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => const ColoredBox(
+                              color: AppTheme.background,
+                              child: Center(
+                                child: SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            errorWidget: (_, __, ___) => const ColoredBox(
+                              color: AppTheme.background,
+                              child: Icon(
+                                Icons.receipt_long_rounded,
+                                color: AppTheme.muted,
+                              ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ],
                 ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.lime,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  '−${Formatters.percent(offer.savingsPercentage)}',
-                  style: const TextStyle(
-                    color: AppTheme.emeraldDark,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 11.5,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                Formatters.currency(offer.price),
-                style: const TextStyle(
-                  fontSize: 25,
-                  fontWeight: FontWeight.w800,
-                  color: AppTheme.emerald,
-                  letterSpacing: -0.7,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  '/ ${offer.unit}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppTheme.muted,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 5),
-                child: Text(
-                  Formatters.currency(offer.oldPrice),
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    color: AppTheme.muted,
-                    decoration: TextDecoration.lineThrough,
-                  ),
-                ),
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 9,
-                  vertical: 5,
-                ),
-                decoration: BoxDecoration(
-                  color: AppTheme.background,
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.line),
-                ),
-                child: Row(
+                const SizedBox(height: 12),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Icon(
-                      Icons.near_me_rounded,
-                      size: 12,
-                      color: AppTheme.emerald,
-                    ),
-                    const SizedBox(width: 3),
                     Text(
-                      '${offer.distanceKm.toStringAsFixed(1)} km',
+                      Formatters.currency(offer.price),
                       style: const TextStyle(
-                        fontSize: 10.5,
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                        color: AppTheme.emerald,
+                        letterSpacing: -0.7,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        '/ ${offer.unitLabel}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppTheme.muted,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    if (offer.oldPrice != null) ...[
+                      const SizedBox(width: 8),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 5),
+                        child: Text(
+                          Formatters.currency(offer.oldPrice!),
+                          style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppTheme.muted,
+                            decoration: TextDecoration.lineThrough,
+                          ),
+                        ),
+                      ),
+                    ],
+                    const Spacer(),
+                    if (offer.savingsPercentage > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.lime,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          '−${Formatters.percent(offer.savingsPercentage)}',
+                          style: const TextStyle(
+                            color: AppTheme.emeraldDark,
+                            fontWeight: FontWeight.w800,
+                            fontSize: 11,
+                          ),
+                        ),
+                      )
+                    else if (offer.distanceLabel.isNotEmpty)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppTheme.background,
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: AppTheme.line),
+                        ),
+                        child: Text(
+                          offer.distanceLabel,
+                          style: const TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700,
+                            color: AppTheme.ink,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Container(
+                      width: 26,
+                      height: 26,
+                      decoration: const BoxDecoration(
+                        color: AppTheme.emeraldTint,
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: Text(
+                        offer.contributorInitials,
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          fontWeight: FontWeight.w800,
+                          color: AppTheme.emeraldDark,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 7),
+                    Expanded(
+                      child: Text(
+                        '${offer.contributorLabel} • ${offer.ageLabel}',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          color: AppTheme.muted,
+                        ),
+                      ),
+                    ),
+                    if (offer.distanceLabel.isNotEmpty) ...[
+                      const Icon(
+                        Icons.near_me_rounded,
+                        size: 12,
+                        color: AppTheme.emerald,
+                      ),
+                      const SizedBox(width: 3),
+                      Text(
+                        offer.distanceLabel,
+                        style: const TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    Text(
+                      '$_confirmations',
+                      style: const TextStyle(
+                        fontSize: 11,
                         fontWeight: FontWeight.w700,
                         color: AppTheme.ink,
                       ),
                     ),
+                    const SizedBox(width: 2),
+                    Semantics(
+                      button: true,
+                      label: 'Confirmar preço',
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(20),
+                        onTap: _confirm,
+                        child: Padding(
+                          padding: const EdgeInsets.all(6),
+                          child: Icon(
+                            _confirmed
+                                ? Icons.thumb_up_alt_rounded
+                                : Icons.thumb_up_alt_outlined,
+                            size: 18,
+                            color:
+                                _confirmed ? AppTheme.emerald : AppTheme.muted,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      size: 18,
+                      color: AppTheme.muted,
+                    ),
                   ],
                 ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _OffersLoading extends StatelessWidget {
+  const _OffersLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return Shimmer.fromColors(
+      baseColor: const Color(0xFFE9ECE8),
+      highlightColor: Colors.white,
+      child: Column(
+        children: List.generate(
+          3,
+          (index) => Container(
+            height: 154,
+            margin: const EdgeInsets.only(bottom: 12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+              border: Border.all(color: AppTheme.line),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CommunityError extends StatelessWidget {
+  final String message;
+  final Future<void> Function() onRetry;
+
+  const _CommunityError({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        border: Border.all(color: AppTheme.line),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.cloud_off_rounded, size: 36, color: AppTheme.amber),
+          const SizedBox(height: 8),
+          const Text(
+            'Não foi possível carregar o radar',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontWeight: FontWeight.w800,
+              color: AppTheme.ink,
+              fontSize: 14.5,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              fontSize: 12,
+              height: 1.4,
+              color: AppTheme.muted,
+            ),
           ),
           const SizedBox(height: 12),
-          const Divider(height: 1),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Container(
-                width: 26,
-                height: 26,
-                decoration: const BoxDecoration(
-                  color: AppTheme.emeraldTint,
-                  shape: BoxShape.circle,
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  initials,
-                  style: const TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w800,
-                    color: AppTheme.emeraldDark,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  '${offer.contributor} • ${offer.ageLabel}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 10.5,
-                    color: AppTheme.muted,
-                  ),
-                ),
-              ),
-              Text(
-                '$_confirmations',
-                style: const TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  color: AppTheme.ink,
-                ),
-              ),
-              const SizedBox(width: 4),
-              Semantics(
-                button: true,
-                label: 'Confirmar Preço',
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(20),
-                  onTap: _confirm,
-                  child: Padding(
-                    padding: const EdgeInsets.all(6),
-                    child: Icon(
-                      _confirmed
-                          ? Icons.thumb_up_alt_rounded
-                          : Icons.thumb_up_alt_outlined,
-                      size: 18,
-                      color: _confirmed ? AppTheme.emerald : AppTheme.muted,
-                    ),
-                  ),
-                ),
-              ),
-            ],
+          FilledButton.tonalIcon(
+            onPressed: onRetry,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Tentar novamente'),
           ),
         ],
       ),
@@ -668,7 +893,9 @@ class _OfferCardState extends State<_OfferCard> {
 }
 
 class _EmptyOffers extends StatelessWidget {
-  const _EmptyOffers();
+  final VoidCallback onContribute;
+
+  const _EmptyOffers({required this.onContribute});
 
   @override
   Widget build(BuildContext context) {
@@ -679,19 +906,30 @@ class _EmptyOffers extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         border: Border.all(color: AppTheme.line),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(Icons.radar_rounded, size: 34, color: AppTheme.amber),
-          SizedBox(height: 8),
-          Text(
-            'Nenhuma oferta por perto',
+          const Icon(Icons.radar_rounded, size: 34, color: AppTheme.amber),
+          const SizedBox(height: 8),
+          const Text(
+            'Nenhuma oferta nesta região',
             style: TextStyle(fontWeight: FontWeight.w700, color: AppTheme.ink),
           ),
-          SizedBox(height: 4),
-          Text(
-            'Amplie a distância ou contribua com o primeiro preço.',
+          const SizedBox(height: 4),
+          const Text(
+            'Amplie a distância, escolha outra cidade ou seja o primeiro a '
+            'compartilhar um preço.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: AppTheme.muted),
+            style: TextStyle(
+              fontSize: 12,
+              height: 1.4,
+              color: AppTheme.muted,
+            ),
+          ),
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            onPressed: onContribute,
+            icon: const Icon(Icons.add_a_photo_rounded, size: 18),
+            label: const Text('Publicar primeira oferta'),
           ),
         ],
       ),
@@ -700,54 +938,82 @@ class _EmptyOffers extends StatelessWidget {
 }
 
 class _ContributeCard extends StatelessWidget {
-  const _ContributeCard();
+  final VoidCallback onTap;
+
+  const _ContributeCard({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: AppTheme.amberTint,
-        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
-        border: Border.all(color: AppTheme.amber.withValues(alpha: 0.2)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: AppTheme.amber.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(14),
-            ),
-            child: const Icon(
-              Icons.add_a_photo_rounded,
-              color: Color(0xFFB26B00),
-              size: 21,
-            ),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+    return Semantics(
+      button: true,
+      label: 'Fotografar oferta e publicar na comunidade',
+      child: Container(
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          color: AppTheme.amberTint,
+          borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+          border: Border.all(color: AppTheme.amber.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Row(
               children: [
-                Text(
-                  'Encontrou um preço melhor?',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w700,
-                    color: AppTheme.ink,
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: AppTheme.amber.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: const Icon(
+                    Icons.add_a_photo_rounded,
+                    color: Color(0xFFB26B00),
+                    size: 21,
                   ),
                 ),
-                SizedBox(height: 2),
-                Text(
-                  'Fotografe a etiqueta no scanner e ajude a vizinhança a economizar.',
-                  style: TextStyle(fontSize: 11.5, color: AppTheme.muted),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Encontrou um preço melhor?',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: AppTheme.ink,
+                        ),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'Fotografe a etiqueta e ajude a vizinhança a economizar.',
+                        style: TextStyle(
+                          fontSize: 11.5,
+                          height: 1.35,
+                          color: AppTheme.muted,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: onTap,
+                style: FilledButton.styleFrom(
+                  backgroundColor: const Color(0xFFB26B00),
+                  foregroundColor: Colors.white,
+                  minimumSize: const Size(0, 48),
+                ),
+                icon: const Icon(Icons.photo_camera_rounded, size: 20),
+                label: const Text('Fotografar oferta'),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

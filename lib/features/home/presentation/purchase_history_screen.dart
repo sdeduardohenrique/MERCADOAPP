@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/models/purchase.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
+import '../domain/purchase_history_sync_service.dart';
+import 'edit_purchase_screen.dart';
 import 'providers/purchase_history_provider.dart';
 
 /// Histórico completo de compras salvas no dispositivo.
@@ -197,7 +199,7 @@ class PurchaseHistoryTile extends ConsumerWidget {
         onTap: () {
           Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (_) => PurchaseDetailScreen(purchase: purchase),
+              builder: (_) => PurchaseDetailScreen(purchaseId: purchase.id),
             ),
           );
         },
@@ -283,13 +285,33 @@ class PurchaseHistoryTile extends ConsumerWidget {
                   color: AppTheme.muted,
                 ),
                 onSelected: (value) async {
+                  if (value == 'edit') {
+                    final result =
+                        await Navigator.of(context).push<PurchaseEditResult>(
+                      MaterialPageRoute(
+                        builder: (_) => EditPurchaseScreen(purchase: purchase),
+                      ),
+                    );
+                    if (!context.mounted || result == null) return;
+                    showPurchaseMutationFeedback(
+                      ScaffoldMessenger.of(context),
+                      result.sync,
+                      success: 'Compra atualizada.',
+                      localOnly: 'Edição salva neste dispositivo.',
+                      failure:
+                          'Edição salva aqui, mas não foi possível sincronizar.',
+                    );
+                    return;
+                  }
+
                   if (value == 'delete') {
                     final confirmed = await showDialog<bool>(
                       context: context,
                       builder: (ctx) => AlertDialog(
                         title: const Text('Excluir compra?'),
                         content: Text(
-                          'A compra em ${purchase.storeName} será removida do histórico.',
+                          'A compra em ${purchase.storeName} será removida do '
+                          'histórico e do total do mês.',
                         ),
                         actions: [
                           TextButton(
@@ -306,14 +328,33 @@ class PurchaseHistoryTile extends ConsumerWidget {
                         ],
                       ),
                     );
-                    if (confirmed == true) {
-                      await ref
-                          .read(purchaseHistoryProvider.notifier)
-                          .removePurchase(purchase.id);
-                    }
+                    if (confirmed != true || !context.mounted) return;
+
+                    final messenger = ScaffoldMessenger.of(context);
+                    final sync = await ref
+                        .read(purchaseHistoryProvider.notifier)
+                        .removePurchase(purchase.id);
+                    showPurchaseMutationFeedback(
+                      messenger,
+                      sync,
+                      success: 'Compra excluída.',
+                      localOnly: 'Compra excluída deste dispositivo.',
+                      failure:
+                          'Compra excluída aqui, mas não foi possível sincronizar.',
+                    );
                   }
                 },
                 itemBuilder: (context) => const [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('Editar compra'),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
                     value: 'delete',
                     child: Row(
@@ -334,14 +375,58 @@ class PurchaseHistoryTile extends ConsumerWidget {
   }
 }
 
-// --------------------------------------------------------------- Detalhes
-class PurchaseDetailScreen extends StatelessWidget {
-  final Purchase purchase;
+/// Feedback padronizado para edição/exclusão local-first.
+void showPurchaseMutationFeedback(
+  ScaffoldMessengerState messenger,
+  PurchaseMutationResult result, {
+  required String success,
+  required String localOnly,
+  required String failure,
+}) {
+  final message = result.isSynced
+      ? success
+      : result.hasFailed
+          ? failure
+          : localOnly;
 
-  const PurchaseDetailScreen({super.key, required this.purchase});
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+// --------------------------------------------------------------- Detalhes
+class PurchaseDetailScreen extends ConsumerWidget {
+  final String purchaseId;
+
+  const PurchaseDetailScreen({super.key, required this.purchaseId});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final purchase = ref.watch(purchaseByIdProvider(purchaseId));
+
+    if (purchase == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Detalhes da compra'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            tooltip: 'Voltar',
+            onPressed: () => Navigator.of(context).pop(),
+          ),
+        ),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(28),
+            child: Text(
+              'Esta compra não está mais no histórico.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: AppTheme.muted),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Detalhes da compra'),
@@ -350,6 +435,18 @@ class PurchaseDetailScreen extends StatelessWidget {
           tooltip: 'Voltar',
           onPressed: () => Navigator.of(context).pop(),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit_rounded),
+            tooltip: 'Editar compra',
+            onPressed: () => _editPurchase(context, ref, purchase),
+          ),
+          IconButton(
+            icon: const Icon(Icons.delete_outline_rounded),
+            tooltip: 'Excluir compra',
+            onPressed: () => _deletePurchase(context, ref, purchase),
+          ),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 28),
@@ -452,6 +549,70 @@ class PurchaseDetailScreen extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Future<void> _editPurchase(
+    BuildContext context,
+    WidgetRef ref,
+    Purchase purchase,
+  ) async {
+    final result = await Navigator.of(context).push<PurchaseEditResult>(
+      MaterialPageRoute(
+        builder: (_) => EditPurchaseScreen(purchase: purchase),
+      ),
+    );
+    if (!context.mounted || result == null) return;
+
+    showPurchaseMutationFeedback(
+      ScaffoldMessenger.of(context),
+      result.sync,
+      success: 'Compra atualizada.',
+      localOnly: 'Edição salva neste dispositivo.',
+      failure: 'Edição salva aqui, mas não foi possível sincronizar.',
+    );
+  }
+
+  Future<void> _deletePurchase(
+    BuildContext context,
+    WidgetRef ref,
+    Purchase purchase,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Excluir compra?'),
+        content: Text(
+          'A compra em ${purchase.storeName} será removida do histórico e do '
+          'total do mês.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            child: const Text('Excluir'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final sync = await ref
+        .read(purchaseHistoryProvider.notifier)
+        .removePurchase(purchase.id);
+
+    if (context.mounted) Navigator.of(context).pop();
+    showPurchaseMutationFeedback(
+      messenger,
+      sync,
+      success: 'Compra excluída.',
+      localOnly: 'Compra excluída deste dispositivo.',
+      failure: 'Compra excluída aqui, mas não foi possível sincronizar.',
     );
   }
 }
@@ -580,7 +741,7 @@ class _ItemRow extends StatelessWidget {
       child: Row(
         children: [
           Container(
-            width: 34,
+            width: item.isByWeight ? 54 : 34,
             height: 34,
             decoration: BoxDecoration(
               color: AppTheme.background,
@@ -588,9 +749,12 @@ class _ItemRow extends StatelessWidget {
             ),
             alignment: Alignment.center,
             child: Text(
-              '${item.quantity}×',
+              item.isByWeight
+                  ? Formatters.weight(item.weightKg!)
+                  : '${item.quantity}×',
+              textAlign: TextAlign.center,
               style: const TextStyle(
-                fontSize: 11,
+                fontSize: 10,
                 fontWeight: FontWeight.w800,
                 color: AppTheme.muted,
               ),

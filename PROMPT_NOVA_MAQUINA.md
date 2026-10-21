@@ -22,7 +22,7 @@ Leia, nesta ordem:
 6. `.agents/skills/*/SKILL.md` — 27 skills curadas (Dart, Flutter, Supabase, testes, análise estática etc.).
 7. `skills-lock.json` — manifesto das skills instaladas.
 8. `pubspec.yaml` e `pubspec.lock` — dependências e versões.
-9. `supabase/migrations/001_initial_schema.sql` — schema inicial do Supabase.
+9. `supabase/migrations/001_initial_schema.sql` e `002_purchases.sql` — schema do Supabase (inclui compras e total mensal).
 10. `tools/apply_mlkit_patches.sh` e `tools/mlkit_patches/` — patches necessários aos plugins ML Kit.
 
 Ao terminar a leitura, diga em poucas linhas o que entendeu e apresente um plano. Não peça para o usuário repetir o contexto.
@@ -505,7 +505,7 @@ Ative “Depuração USB” no aparelho e aceite a impressão digital RSA.
 - Ajuste `android.sdk.licenses.dir` para o caminho da nova máquina ou remova essa linha se `android.disableLicenseCheck=true` funcionar.
 - **Não reative o R8 full mode** sem revalidar o APK release: `shared_preferences` 2.5+/jni quebra com `NoSuchMethodError`/`ClassNotFoundException`.
 - `applicationId` atual: `com.example.mercado_app`.
-- Versão atual: `1.0.0+2002`.
+- Versão atual: `1.0.0+2004`.
 - A release usa assinatura de debug. Não distribua assim; trocar appId e keystore é pendente.
 - O Gradle wrapper 9.3.1 está versionado; a primeira build baixa a distribuição.
 - `android/local.properties` não é versionado e deve ser gerado localmente.
@@ -522,26 +522,38 @@ flutter test
 Estado esperado:
 
 - `dart analyze` sem erros.
-- **37 testes passando**.
-- Principais testes: `test/price_parser_test.dart` (18 casos), `test/label_confirmation_test.dart` (throttle/confirmação) e `test/scan_confirmation_sheet_test.dart`.
+- **87 testes passando**.
+- Principais testes: `test/price_parser_test.dart`, `test/label_confirmation_test.dart`,
+  `test/scan_confirmation_sheet_test.dart`, `test/active_purchase_flow_test.dart`,
+  `test/market_selection_test.dart`, `test/dashboard_period_provider_test.dart`,
+  `test/community_offer_test.dart`, `test/community_screen_test.dart`,
+  `test/cart_editor_flow_test.dart` e `test/purchase_budget_sheet_test.dart`.
 
 Build release de referência:
 
 ```bash
-flutter build apk --release --target-platform android-arm64
+flutter build apk --release --split-per-abi
 adb devices
-adb install -r build/app/outputs/flutter-apk/app-release.apk
+adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-O APK ARM64 de referência tem cerca de **39,5 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
+O APK ARM64 de referência tem cerca de **41,9 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
 
 ---
 
 # 7. Estado funcional que deve ser preservado
 
 - Primeira tela após a splash é o **dashboard financeiro**, não a câmera nem lista vazia.
-- Três abas: **Início**, **Comunidade** e **Perfil**, com estado preservado (`IndexedStack`).
+- Três abas: **Início**, **Comunidade** e **Perfil**, com estado preservado (`IndexedStack`), construídas apenas na primeira visita.
+- Compra com ou sem mercado: sem mercado, fica só no histórico pessoal e não publica ofertas.
+- Dashboard com filtros *Este mês*, *Últimos 3 meses*, *Este ano* e *Personalizado*.
+- Comunidade com ofertas reais, cidade/raio 5/10/20 km, foto, endereço, distância e rotas Google Maps/Waze.
 - Histórico persistente, detalhe de compra, entrada manual, folha de confirmação e finalização que salva no histórico.
+- Carrinho com **edição pelo lápis** (nome, preço, tipo de cobrança, quantidade ou peso),
+  **unidade × peso/kg**, **stepper inline** (1 un ou 100 g), **prova de prateleira**
+  (miniatura 48×48 ao lado do nome que abre a foto da etiqueta em tela cheia) e
+  **card de orçamento dinâmico** (Zona segura verde ≤75%, atenção amarelo 76–100%,
+  estourado vermelho >100%, com `AnimatedContainer`).
 - Scanner com câmera em `ResolutionPreset.medium`, ~15 fps, throttle de **800–1000 ms**, `_isProcessing` descartando frames, ML Kit sem bloquear a UI e conversão YUV em `Isolate.run`.
 - Validação estrita de preço: cifrão/padrão monetário, duas casas decimais, faixa **R$ 0,10–R$ 500,00**, rejeição de datas/EAN/porcentagens/pesos.
 - Confirmação em **2 frames consecutivos** antes de sugerir o item; feedback “Aproxime da etiqueta de preço”, háptico forte e pausa para confirmação.
@@ -557,8 +569,7 @@ O APK ARM64 de referência tem cerca de **39,5 MB**. O preview da câmera aparec
 2. Corrigir a conversão `CameraImage → InputImage` para **NV21 real** (intercalar V/U) e medir ganho de leitura.
 3. Trocar `applicationId` e criar keystore própria antes de distribuir.
 4. Implementar entrada por voz (`speech_to_text`) e checkout fiscal.
-5. Substituir as ofertas mock da Comunidade pela RPC/PostGIS do Supabase.
-6. Avaliar a remoção das 4 compras demo no primeiro arranque de produção.
+5. Avaliar a remoção das 4 compras demo no primeiro arranque de produção.
 
 ---
 

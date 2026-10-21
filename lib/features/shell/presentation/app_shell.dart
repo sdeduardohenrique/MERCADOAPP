@@ -19,18 +19,42 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   int _index = 0;
 
-  static const _screens = <Widget>[
-    HomeDashboardScreen(),
-    CommunityScreen(),
-    ProfileScreen(),
+  /// As abas só são construídas quando visitadas. Isso evita pedir GPS ou
+  /// consultar a comunidade enquanto o utilizador ainda está no Dashboard.
+  final List<Widget?> _screens = <Widget?>[
+    const HomeDashboardScreen(),
+    null,
+    null,
   ];
+
+  static Widget _screenFor(int index) {
+    switch (index) {
+      case 1:
+        return const CommunityScreen();
+      case 2:
+        return const ProfileScreen();
+      case 0:
+      default:
+        return const HomeDashboardScreen();
+    }
+  }
+
+  void _selectTab(int index) {
+    setState(() {
+      _screens[index] ??= _screenFor(index);
+      _index = index;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       body: IndexedStack(
         index: _index,
-        children: _screens,
+        children: [
+          for (var i = 0; i < _screens.length; i++)
+            _screens[i] ?? const SizedBox.shrink(),
+        ],
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
@@ -50,7 +74,7 @@ class _AppShellState extends State<AppShell> {
           top: false,
           child: BottomNavigationBar(
             currentIndex: _index,
-            onTap: (index) => setState(() => _index = index),
+            onTap: _selectTab,
             backgroundColor: Colors.white,
             elevation: 0,
             type: BottomNavigationBarType.fixed,

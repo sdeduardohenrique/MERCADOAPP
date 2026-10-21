@@ -66,7 +66,7 @@ class EanValidator {
   static List<String> extractValidEans(List<String> barcodes) {
     return barcodes
         .map((b) => normalize(b))
-        .where((e) => e != null && isValidEan(e!))
+        .where((e) => e != null && isValidEan(e))
         .cast<String>()
         .toSet()
         .toList();

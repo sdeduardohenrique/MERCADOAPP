@@ -83,11 +83,7 @@ class PriceParser {
 
   /// Parses OCR text and extracts product information.
   static ParsedOcrItem? parseFromOcr(String fullText) {
-    final lines = fullText
-        .split('\n')
-        .map((l) => l.trim())
-        .where((l) => l.isNotEmpty)
-        .toList();
+    final lines = _nonEmptyLines(fullText);
 
     if (lines.isEmpty) return null;
 
@@ -111,6 +107,37 @@ class PriceParser {
       quantity: quantity,
       unit: unit,
     );
+  }
+
+  /// Extracts only a reliable price from OCR.
+  ///
+  /// Used when the camera read a price but could not identify a usable product
+  /// name. The same conservative rules of [parseFromOcr] apply.
+  static double? parsePriceFromOcr(String fullText) {
+    final lines = _nonEmptyLines(fullText);
+    if (lines.isEmpty) return null;
+    return _findBestPrice(lines)?.value;
+  }
+
+  /// Extracts a possible product name even when no price was found.
+  ///
+  /// The scanner uses this only to pre-fill the partial-read sheet; the user
+  /// still confirms the value before it enters the cart.
+  static String? extractProductNameFromOcr(String fullText) {
+    final lines = _nonEmptyLines(fullText);
+    if (lines.isEmpty) return null;
+
+    final name = _extractProductName(lines);
+    if (name == null || name.length < 2) return null;
+    return TextNormalizer.cleanProductName(name);
+  }
+
+  static List<String> _nonEmptyLines(String fullText) {
+    return fullText
+        .split('\n')
+        .map((line) => line.trim())
+        .where((line) => line.isNotEmpty)
+        .toList();
   }
 
   /// Parses a monetary string into a double.

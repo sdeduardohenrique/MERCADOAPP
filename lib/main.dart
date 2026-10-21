@@ -8,8 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/bootstrap/app_bootstrap.dart';
 import 'core/constants/app_constants.dart';
 import 'core/theme/app_theme.dart';
-import 'features/shell/presentation/app_shell.dart';
-import 'features/splash/presentation/splash_screen.dart';
+import 'features/auth/presentation/auth_gate.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -17,7 +16,7 @@ void main() {
   _configureErrorHandlers();
 
   // A UI sobe imediatamente. A inicialização do Supabase acontece em segundo
-  // plano (BootstrapGate), então uma falha de rede/plugin nunca deixa o app
+  // plano (AuthGate), então uma falha de rede/plugin nunca deixa o app
   // preso na tela preta do launch theme.
   runApp(const ProviderScope(child: SomaAiApp()));
 }
@@ -64,59 +63,8 @@ class SomaAiApp extends StatelessWidget {
         Locale('pt', 'BR'),
         Locale('en'),
       ],
-      home: const BootstrapGate(),
+      home: const AuthGate(initialize: [AppBootstrap.initialize]),
     );
-  }
-}
-
-/// Aguarda a inicialização do Supabase sem bloquear o primeiro frame.
-class BootstrapGate extends StatefulWidget {
-  const BootstrapGate({super.key, this.initialize = AppBootstrap.initialize});
-
-  /// Injetável para testes; em produção usa [AppBootstrap.initialize].
-  final Future<void> Function() initialize;
-
-  @override
-  State<BootstrapGate> createState() => _BootstrapGateState();
-}
-
-class _BootstrapGateState extends State<BootstrapGate> {
-  bool _ready = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _boot();
-  }
-
-  Future<void> _boot() async {
-    await widget.initialize();
-
-    if (!mounted) return;
-
-    setState(() => _ready = true);
-
-    if (AppBootstrap.error != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Modo offline: não foi possível conectar ao servidor de preços.',
-            ),
-            duration: Duration(seconds: 5),
-          ),
-        );
-      });
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (!_ready) {
-      return const SplashScreen();
-    }
-    return const AppShell();
   }
 }
 

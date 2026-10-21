@@ -1,106 +1,114 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
-import '../../../core/theme/app_theme.dart';
-import '../../../core/widgets/somaai_logo.dart';
+/// Cor de fundo exata do SVG da logo (retângulo base do ícone)
+const Color _kSplashBackground = Color(0xFF1DB954);
 
-/// Splash exibida enquanto os serviços externos inicializam.
+/// Tela de abertura (Splash) com animação de entrada.
 ///
-/// Importante: usa apenas widgets nativos (sem fontes de rede) para garantir
-/// que o primeiro frame apareça imediatamente, mesmo em modo release/offline.
-class SplashScreen extends StatelessWidget {
+/// Exibe a logo centralizada com animação de fade-in + scale-up e um
+/// CircularProgressIndicator branco na base. O controle de tempo mínimo
+/// e navegação é feito pelo [BootstrapGate] no main.dart.
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
+
+  @override
+  State<SplashScreen> createState() => _SplashScreenState();
+}
+
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _animationController;
+  late final Animation<double> _fadeAnimation;
+  late final Animation<double> _scaleAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 1200),
+      vsync: this,
+    );
+
+    _fadeAnimation = Tween<double>(begin: 0.0, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.0, 0.6, curve: Curves.easeOut),
+      ),
+    );
+
+    _scaleAnimation = Tween<double>(begin: 0.8, end: 1.0).animate(
+      CurvedAnimation(
+        parent: _animationController,
+        curve: const Interval(0.1, 0.8, curve: Curves.elasticOut),
+      ),
+    );
+
+    // Inicia a animação imediatamente
+    _animationController.forward();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppTheme.emeraldDark,
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF0B8A5F), Color(0xFF07603F)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: Stack(
+      backgroundColor: _kSplashBackground,
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Positioned(
-              top: -80,
-              right: -60,
-              child: Container(
-                width: 240,
-                height: 240,
-                decoration: BoxDecoration(
-                  color: AppTheme.lime.withValues(alpha: 0.1),
-                  shape: BoxShape.circle,
+            const Spacer(flex: 3),
+            // Logo com animação de fade-in + scale-up
+            AnimatedBuilder(
+              animation: _animationController,
+              builder: (context, child) {
+                return FadeTransition(
+                  opacity: _fadeAnimation,
+                  child: ScaleTransition(
+                    scale: _scaleAnimation,
+                    child: child,
+                  ),
+                );
+              },
+              child: SvgPicture.asset(
+                'assets/images/logo.svg',
+                width: 180,
+                height: 180,
+                // Placeholder enquanto o SVG carrega
+                placeholderBuilder: (context) => const SizedBox(
+                  width: 180,
+                  height: 180,
                 ),
               ),
             ),
-            Positioned(
-              bottom: -100,
-              left: -70,
-              child: Container(
-                width: 260,
-                height: 260,
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
-                  shape: BoxShape.circle,
-                ),
+            const Spacer(flex: 2),
+            // Indicador de carregamento branco
+            const SizedBox(
+              width: 28,
+              height: 28,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
               ),
             ),
-            SafeArea(
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(34),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.18),
-                            blurRadius: 30,
-                            offset: const Offset(0, 14),
-                          ),
-                        ],
-                      ),
-                      child: const SomaAiLogo(size: 84, showShadow: false),
-                    ),
-                    const SizedBox(height: 24),
-                    const Text(
-                      'SomaAí',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 42,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -1.6,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sem sustos no caixa.',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.78),
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        letterSpacing: 0.1,
-                      ),
-                    ),
-                    const SizedBox(height: 40),
-                    const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2.5,
-                        color: AppTheme.lime,
-                      ),
-                    ),
-                  ],
-                ),
+            const SizedBox(height: 24),
+            // Texto opcional de carregamento
+            Text(
+              'Carregando...',
+              style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.78),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                letterSpacing: 0.2,
               ),
             ),
+            const Spacer(flex: 1),
           ],
         ),
       ),

@@ -522,7 +522,7 @@ flutter test
 Estado esperado:
 
 - `dart analyze` sem erros.
-- **87 testes passando**.
+- **93 testes passando**.
 - Principais testes: `test/price_parser_test.dart`, `test/label_confirmation_test.dart`,
   `test/scan_confirmation_sheet_test.dart`, `test/active_purchase_flow_test.dart`,
   `test/market_selection_test.dart`, `test/dashboard_period_provider_test.dart`,
@@ -537,7 +537,7 @@ adb devices
 adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-O APK ARM64 de referência tem cerca de **41,9 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
+O APK ARM64 de referência tem cerca de **42,8 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
 
 ---
 
@@ -554,6 +554,17 @@ O APK ARM64 de referência tem cerca de **41,9 MB**. O preview da câmera aparec
   (miniatura 48×48 ao lado do nome que abre a foto da etiqueta em tela cheia) e
   **card de orçamento dinâmico** (Zona segura verde ≤75%, atenção amarelo 76–100%,
   estourado vermelho >100%, com `AnimatedContainer`).
+- **Splash Screen + Auth Checker**: tela de abertura com fundo verde `#1DB954`, logo SVG animada
+  (fade-in + scale-up 0.8→1.0), `CircularProgressIndicator` branco, timer mínimo 2500 ms;
+  `BootstrapGate` verifica `SupabaseService.currentUser` e redireciona para `AppShell`
+  (autenticado) ou `LoginScreen` (não autenticado, com opção "Continuar como visitante").
+- **Autenticação Social + Passwordless**: `AuthService` centralizado com `AuthResult` sealed class;
+  **Google OAuth** (`google_sign_in` → ID Token → `signInWithIdToken`), **Apple OAuth** (`sign_in_with_apple`
+  com nonce SHA-256 → `signInWithIdToken`), **Telefone OTP SMS** (`signInWithOtp` + `verifyOTP`),
+  tela `OTPVerificationScreen` (6 dígitos PIN, timer reenvio 60s), `PhoneLoginSheet` com máscara
+  `(XX) XXXXX-XXXX`; `RegisterScreen` e `LoginScreen` atualizados com botões Google/Apple/Phone;
+  dependências: `google_sign_in`, `sign_in_with_apple`, `pin_code_fields`; guia completa em `GUIA_AUTH_SOCIAL.md`
+  (Supabase Providers, Google Cloud OAuth, Apple Services ID/Key, Twilio, Deep Links Android/iOS).
 - Scanner com câmera em `ResolutionPreset.medium`, ~15 fps, throttle de **800–1000 ms**, `_isProcessing` descartando frames, ML Kit sem bloquear a UI e conversão YUV em `Isolate.run`.
 - Validação estrita de preço: cifrão/padrão monetário, duas casas decimais, faixa **R$ 0,10–R$ 500,00**, rejeição de datas/EAN/porcentagens/pesos.
 - Confirmação em **2 frames consecutivos** antes de sugerir o item; feedback “Aproxime da etiqueta de preço”, háptico forte e pausa para confirmação.

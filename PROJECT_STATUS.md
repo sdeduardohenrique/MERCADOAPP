@@ -233,18 +233,18 @@ Atualizar com `npx skills add flutter/skills --skill '*' --agent universal`.
 
 | Artefato | Caminho | Tamanho |
 |----------|---------|---------|
-| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **41,9 MB** |
-| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 34,7 MB |
-| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 45,4 MB |
-| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 41,9 MB |
-| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 41,9 MB |
+| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **42,8 MB** |
+| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 35,6 MB |
+| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 46,3 MB |
+| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 42,8 MB |
+| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 42,8 MB |
 | Debug ARM64 | `build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk` | 186 MB |
 | Debug universal | `build/app/outputs/flutter-apk/app-debug.apk` | 372 MB |
 
 Assinatura: chave **debug** (suficiente para testes; trocar antes de publicar).
 Label exibido no Android: **SomaAí** (`applicationId` ainda é `com.example.mercado_app`).
 Versão instalada: `1.0.0` (`versionCode 4004`).
-SHA-256 do ARM64: `4b8e2aa009b834ec8b29367d12e9c8eebfc6781ce115365d49ec61998664d539`.
+SHA-256 do ARM64: `f5a84d79b3c7a2ce873afef79ab28d74d7fb84a1858d5f3d7931d05877d8dfed`.
 
 ### Instalação no Redmi Note 11 (`6D4TQKXGONGAU8FE`)
 
@@ -422,7 +422,7 @@ Fluxo executado no Redmi Note 11 (`1080×2400`, Android 13), com dados de demons
   miniatura da etiqueta (com e sem foto), zonas do card de orçamento e foto da etiqueta
   em tela cheia.
 - `test/purchase_budget_sheet_test.dart`: definir, continuar sem e remover orçamento.
-- Suíte completa: **87 testes** passando; `dart analyze lib test integration_test`
+- Suíte completa: **93 testes** passando; `dart analyze lib test integration_test`
   sem issues.
 
 **Validação no Redmi Note 11**
@@ -468,7 +468,7 @@ mexer no throttle.
 - [x] **ProGuard/R8 ampliado**: Flutter, MethodChannel handlers, ML Kit, GMS, Supabase, JNI e anotações
 - [x] **Launch theme verde** (`@color/launch_background`) — elimina o flash preto do modo escuro
 - [x] **Câmera resiliente**: timeout de 15s, botão “Tentar novamente”, `dispose` seguro
-- [x] Testes: **87 testes** passando (splash, fallback do `BootstrapGate`, Dashboard,
+- [x] Testes: **93 testes** passando (splash, fallback do `BootstrapGate`, Dashboard,
       filtros de período, troca de aba, modelo `Purchase`, formatadores, parser de
       preços, gate de confirmação em 2 frames, folha do scanner, fluxo do carrinho,
       compra sem mercado, edição do histórico, checkout, identificação de mercado,
@@ -499,6 +499,48 @@ mexer no throttle.
       (eliminado o erro repetido “a camera has started streaming images”)
 - [x] Diálogo de finalização sem autofocus no campo do mercado (sem teclado/handle por cima)
       e contagem no singular (“1 item”)
+
+### 🚀 Tela de Abertura (Splash Screen) + Auth Checker (out/2026)
+
+- [x] **Splash Screen animada** (`splash_screen.dart`): fundo verde exato da logo (`#1DB954`),
+      logo SVG centralizada com animação **fade-in + scale-up (0.8→1.0)** via
+      `TweenAnimationBuilder`, `CircularProgressIndicator` branco na base, texto
+      "Carregando..." sutil
+- [x] **Auth Checker no `BootstrapGate`** (`main.dart`): inicialização paralela do
+      Supabase + timer mínimo de **2500 ms** para a animação fluir; verificação de
+      `SupabaseService.currentUser` ao final
+- [x] **Redirecionamento inteligente**: se autenticado → `AppShell` (Dashboard);
+      se não autenticado → `LoginScreen` (com opção "Continuar como visitante"
+      para modo offline)
+- [x] **Login Screen** (`login_screen.dart`): email/senha com validação,
+      tratamento de erros do Supabase (`AuthException`), botão "Esqueci a senha"
+      e "Criar conta" (placeholders), entrada como visitante
+
+### 🔐 Autenticação Social + Passwordless (out/2026)
+
+- [x] **Login Social — Google** (`AuthService.signInWithGoogle`): fluxo OAuth nativo
+      via `google_sign_in` → ID Token → `Supabase.signInWithIdToken(provider: google)`
+- [x] **Login Social — Apple** (`AuthService.signInWithApple`): fluxo nativo
+      `sign_in_with_apple` com nonce SHA-256 → Identity Token → `Supabase.signInWithIdToken(provider: apple, nonce: rawNonce)`
+- [x] **Autenticação por Telefone (OTP SMS)** (`AuthService.sendPhoneOTP` /
+      `verifyPhoneOTP`): `Supabase.signInWithOtp(phone:)` + `verifyOTP(type: OtpType.sms)`
+      com tela `OTPVerificationScreen` (6 dígitos PIN, `pin_code_fields`),
+      timer de reenvio 60s, máscara `(XX) XXXXX-XXXX` no `PhoneLoginSheet`
+- [x] **AuthService centralizado** (`auth_service.dart`): sealed class `AuthResult`
+      (`AuthSuccess`, `AuthFailure`, `AuthPending`), mapeamento de erros
+      `AuthException` para PT-BR, normalização de telefone para E.164 (+55)
+- [x] **LoginScreen & RegisterScreen redesenhadas**: toggle **Email ↔ Telefone** integrado
+      ao formulário (mesmo card), botões sociais **apenas ícones** (Google, Apple, Phone)
+      com tooltip, divisor "OU ENTRE COM" / "OU CADASTRE COM", validação unificada
+- [x] **RegisterScreen atualizada**: mesmos provedores (Google, Apple, Phone OTP)
+      + email/senha, validação de confirmação de senha
+- [x] **Dependências**: `google_sign_in: ^6.2.1`, `sign_in_with_apple: ^6.1.0`,
+      `pin_code_fields: ^8.0.1`
+- [x] **Guia de configuração externa**: `GUIA_AUTH_SOCIAL.md` com passo a passo
+      Supabase (Providers, Redirect URLs, SMTP), Google Cloud (OAuth Client IDs,
+      SHA-1 debug/release, `google-services.json`), Apple Developer (App ID,
+      Services ID, Key .p8, Team ID), Twilio (Account SID, Auth Token, número),
+      AndroidManifest (deep links `somaai://`), Info.plist (URL Schemes)
 
 ### 🛒 Carrinho — edição, peso, foto e orçamento (out/2026)
 

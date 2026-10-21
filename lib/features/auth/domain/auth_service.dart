@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
@@ -12,8 +13,8 @@ import '../../../core/services/supabase_service.dart';
 
 // Simple debug print wrapper that works in all environments
 void _log(String message) {
-  // Using print instead of _log for compatibility with test environment
-  // In production, _log would be preferred for performance
+  // Using print instead of debugPrint for compatibility with test environment
+  // In production, debugPrint would be preferred for performance
   print(message);
 }
 
@@ -57,10 +58,10 @@ class AuthService {
   AuthService._();
   static final AuthService instance = AuthService._();
 
+  // Configuração do Google Sign-In com serverClientId do ambiente
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile', 'openid'],
-    // O serverClientId deve ser configurado para o Android/iOS
-    // serverClientId: 'SEU_WEB_CLIENT_ID.apps.googleusercontent.com',
+    serverClientId: const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'),
   );
 
   /// Verifica se há uma sessão ativa
@@ -199,12 +200,22 @@ class AuthService {
 
       // 2. Inicia o fluxo do Apple Sign-In
       _log('[AuthService] Requesting Apple ID credential...');
+
+      // Configuração específica para Android (requer webAuthenticationOptions)
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
           AppleIDAuthorizationScopes.fullName,
         ],
         nonce: nonce,
+        webAuthenticationOptions: kIsWeb || Platform.isAndroid
+            ? WebAuthenticationOptions(
+                clientId: const String.fromEnvironment('APPLE_CLIENT_ID'),
+                redirectUri: Uri.parse(
+                    const String.fromEnvironment('APPLE_REDIRECT_URI'),
+                ),
+              )
+            : null,
       );
 
       _log('[AuthService] Received Apple credential:');

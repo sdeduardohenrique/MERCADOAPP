@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Cor de fundo exibida pelo Android antes do primeiro frame do Flutter.
+         Usar a cor da marca evita o "flash" preto em modo escuro. -->
+    <color name="launch_background">#07603F</color>
+    <!-- Fundo do ícone adaptativo (Android 8+). -->
+    <color name="ic_launcher_background">#0E9F6E</color>
+</resources>

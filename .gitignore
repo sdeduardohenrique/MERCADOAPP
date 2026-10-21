@@ -1,0 +1,144 @@
+# ============================================================
+# SomaAí — .gitignore
+# Versionar: código, testes, docs, skills e scripts.
+# Bloquear: caches, venv, builds, APKs, SDKs locais e segredos.
+# ============================================================
+
+# ------------------------------------------------------------
+# Flutter / Dart
+# ------------------------------------------------------------
+.dart_tool/
+.packages
+.pub-cache/
+.pub/
+build/
+*.dart_tool_package_config.json
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# ------------------------------------------------------------
+# IDE / editor
+# ------------------------------------------------------------
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# ------------------------------------------------------------
+# Sistema operacional
+# ------------------------------------------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Diretório acidental de SDK local (~2,5 GB). Nunca versionar.
+/~
+
+# ------------------------------------------------------------
+# Ambiente / segredos
+# ------------------------------------------------------------
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.keystore
+*.jks
+key.properties
+
+# ------------------------------------------------------------
+# Python / ambiente do agente
+# ------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ------------------------------------------------------------
+# Supabase
+# ------------------------------------------------------------
+.supabase/
+supabase/.temp/
+
+# ------------------------------------------------------------
+# Arquivos gerados
+# ------------------------------------------------------------
+lib/core/generated/
+*.g.dart
+*.freezed.dart
+*.gr.dart
+
+# ------------------------------------------------------------
+# Cobertura de testes
+# ------------------------------------------------------------
+coverage/
+*.lcov
+
+# ------------------------------------------------------------
+# Logs
+# ------------------------------------------------------------
+*.log
+
+# ------------------------------------------------------------
+# Artefatos de build
+# ------------------------------------------------------------
+*.apk
+*.aab
+*.ipa
+*.app
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+
+# ------------------------------------------------------------
+# Android
+# ------------------------------------------------------------
+android/app/src/main/res/values/google_maps_api.xml
+android/local.properties
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+# IMPORTANTE: android/gradle.properties É versionado.
+# Ele contém android.enableR8.fullMode=false. Não reative o R8
+# full mode sem revalidar o APK release (shared_preferences/jni).
+
+# ------------------------------------------------------------
+# iOS
+# ------------------------------------------------------------
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.podspec
+ios/Runner/Generated.xcconfig
+ios/Flutter/ephemeral/
+
+# ------------------------------------------------------------
+# Web
+# ------------------------------------------------------------
+web/build/
+
+# ------------------------------------------------------------
+# Testes
+# ------------------------------------------------------------
+integration_test/*.dart.js
+# integration_test/*_test.dart NÃO é ignorado: são testes versionados.
+
+# ------------------------------------------------------------
+# Ferramentas de agente vendorizadas (~1,9 GB)
+# As skills curadas do projeto estão em .agents/skills e .cursor/rules.
+# ------------------------------------------------------------
+HABILIDADES/tools/
+
+# ------------------------------------------------------------
+# Diversos
+# ------------------------------------------------------------
+*.orig
+*.bak
+*.tmp

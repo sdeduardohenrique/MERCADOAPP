@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Símbolo SomaAí: cesta + selo de soma. Camada frontal do adaptive icon. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Asa da cesta -->
+    <path
+        android:pathData="M41,52 C41,37 67,37 67,52"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:fillColor="@android:color/transparent" />
+
+    <!-- Corpo da cesta -->
+    <path
+        android:pathData="M33,52 L75,52 L70,74 Q69,79 64,79 L44,79 Q39,79 38,74 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5"
+        android:strokeLineJoin="round"
+        android:fillColor="@android:color/transparent" />
+
+    <!-- Selo lima com "+" -->
+    <path
+        android:pathData="M72,30 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0"
+        android:fillColor="#C8F169" />
+    <path
+        android:pathData="M72,24 L72,36 M66,30 L78,30"
+        android:strokeColor="#07603F"
+        android:strokeWidth="4"
+        android:strokeLineCap="round" />
+</vector>

@@ -1,0 +1,82 @@
+name: soma_ai
+description: "SomaAí — calculadora de carrinho inteligente com leitura de etiquetas por câmera (OCR + código de barras), entrada por voz/manual e comparação de preços da comunidade via Supabase/PostGIS."
+publish_to: 'none'
+version: 1.0.0+2002
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State Management
+  flutter_riverpod: ^2.4.9
+  riverpod_annotation: ^2.3.3
+
+  # Backend - Supabase
+  supabase_flutter: ^2.3.4
+
+  # Camera & ML Vision
+  camera: ^0.10.5+9
+  google_mlkit_text_recognition: ^0.7.0
+  google_mlkit_barcode_scanning: ^0.7.0
+  mobile_scanner: ^5.1.1
+
+  # Location & Permissions
+  geolocator: ^11.0.0
+  permission_handler: ^11.2.0
+
+  # Local Database (Offline-first)
+  drift: ^2.14.0
+  sqlite3_flutter_libs: ^0.5.0
+  path_provider: ^2.1.1
+  path: ^1.8.3
+
+  # Utilities
+  intl: ^0.20.3
+  equatable: ^2.0.5
+  flutter_animate: ^4.5.0
+  logger: ^2.2.0
+  uuid: ^4.3.3
+  shared_preferences: ^2.2.2
+  image: ^4.1.7
+  google_fonts: ^6.1.0
+
+  # UI Helpers
+  cached_network_image: ^3.3.0
+  shimmer: ^3.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  riverpod_generator: ^2.3.9
+  build_runner: ^2.4.7
+  custom_lint: ^0.6.0
+  riverpod_lint: ^2.3.7
+  mocktail: ^1.0.0
+  drift_dev: ^2.14.0
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  generate: true
+
+  assets:
+    - assets/images/
+    - assets/icons/
+
+# Flavors configuration
+flutter_gen:
+  output: lib/core/generated/
+  line_length: 120
+
+# Code generation
+scripts:
+  gen: dart run build_runner build --delete-conflicting-outputs
+  watch: dart run build_runner watch --delete-conflicting-outputs

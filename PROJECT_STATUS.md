@@ -233,18 +233,18 @@ Atualizar com `npx skills add flutter/skills --skill '*' --agent universal`.
 
 | Artefato | Caminho | Tamanho |
 |----------|---------|---------|
-| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **42,8 MB** |
-| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 35,6 MB |
-| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 46,3 MB |
-| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 42,8 MB |
-| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 42,8 MB |
+| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **42,7 MB** |
+| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 35,5 MB |
+| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 46,2 MB |
+| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 42,7 MB |
+| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 42,7 MB |
 | Debug ARM64 | `build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk` | 186 MB |
 | Debug universal | `build/app/outputs/flutter-apk/app-debug.apk` | 372 MB |
 
 Assinatura: chave **debug** (suficiente para testes; trocar antes de publicar).
 Label exibido no Android: **SomaAí** (`applicationId` ainda é `com.example.mercado_app`).
 Versão instalada: `1.0.0` (`versionCode 4004`).
-SHA-256 do ARM64: `f5a84d79b3c7a2ce873afef79ab28d74d7fb84a1858d5f3d7931d05877d8dfed`.
+SHA-256 do ARM64: `a22c5ca2ce3002ecc2868789cbdc27f93bb1b1dba757963ffc42e19e52d128c0`.
 
 ### Instalação no Redmi Note 11 (`6D4TQKXGONGAU8FE`)
 

@@ -537,7 +537,7 @@ adb devices
 adb install -r build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
 ```
 
-O APK ARM64 de referência tem cerca de **42,8 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
+O APK ARM64 de referência tem cerca de **42,7 MB**. O preview da câmera aparece preto em `adb screencap` porque é uma `Texture`; isso não é bug visual. Para inspecionar bounds reais, use `uiautomator dump`.
 
 ---
 

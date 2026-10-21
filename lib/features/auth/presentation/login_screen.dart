@@ -6,8 +6,6 @@ import '../../../core/theme/app_theme.dart';
 import '../../shell/presentation/app_shell.dart';
 import '../domain/auth_service.dart';
 import 'forgot_password_screen.dart';
-import 'otp_verification_screen.dart';
-import 'phone_login_sheet.dart';
 import 'register_screen.dart';
 
 /// Tela de login/entrada do app com suporte a múltiplos provedores.
@@ -16,7 +14,6 @@ import 'register_screen.dart';
 /// - Email e senha
 /// - Google OAuth
 /// - Apple OAuth
-/// - Número de celular (OTP SMS)
 /// - Continuar como visitante (modo offline)
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -29,44 +26,15 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _phoneController = TextEditingController();
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
-  bool _isPhoneMode = false;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
-    _phoneController.dispose();
     super.dispose();
-  }
-
-  String _formatPhoneInput(String value) {
-    final digits = value.replaceAll(RegExp(r'\D'), '');
-    if (digits.length > 11) return _formatPhoneInput(value.substring(0, value.length - 1));
-
-    String formatted = '';
-    if (digits.length >= 1) formatted = '($digits';
-    if (digits.length >= 2) formatted = '(${digits.substring(0, 2)})';
-    if (digits.length >= 3) formatted = '(${digits.substring(0, 2)}) ${digits.substring(2)}';
-    if (digits.length >= 7) {
-      if (digits.length == 11) {
-        formatted = '(${digits.substring(0, 2)}) ${digits.substring(2, 7)}-${digits.substring(7)}';
-      } else {
-        formatted = '(${digits.substring(0, 2)}) ${digits.substring(2, 6)}-${digits.substring(6)}';
-      }
-    }
-    return formatted;
-  }
-
-  String _normalizePhoneForAPI(String formatted) {
-    final digits = formatted.replaceAll(RegExp(r'\D'), '');
-    if (!digits.startsWith('55')) {
-      return '+55$digits';
-    }
-    return '+$digits';
   }
 
   Future<void> _signInWithEmail() async {
@@ -99,58 +67,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _errorMessage = message;
           });
         },
-        pending: (phone) {},
       );
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
         _errorMessage = 'Erro inesperado. Tente novamente.';
-      });
-    }
-  }
-
-  Future<void> _signInWithPhone() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      final normalizedPhone = _normalizePhoneForAPI(_phoneController.text);
-      final result = await authService.sendPhoneOTP(phone: normalizedPhone);
-
-      if (!mounted) return;
-
-      result.when(
-        success: (user) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const AppShell()),
-            (route) => false,
-          );
-        },
-        failure: (message, code) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = message;
-          });
-        },
-        pending: (phone) {
-          Navigator.of(context).push(
-            MaterialPageRoute(
-              builder: (_) => OTPVerificationScreen(phone: phone),
-            ),
-          );
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Erro ao enviar SMS. Tente novamente.';
       });
     }
   }
@@ -177,7 +99,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _errorMessage = message;
           });
         },
-        pending: (phone) {},
       );
     } catch (e) {
       if (!mounted) return;
@@ -210,7 +131,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             _errorMessage = message;
           });
         },
-        pending: (phone) {},
       );
     } catch (e) {
       if (!mounted) return;
@@ -219,10 +139,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _errorMessage = 'Erro no login com Apple.';
       });
     }
-  }
-
-  void _openPhoneLogin() {
-    showPhoneLoginSheet(context);
   }
 
   void _continueAsGuest() {
@@ -276,7 +192,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 40),
-                  // Formulário de login
+                  // Formulário de login com email/senha
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
@@ -296,181 +212,100 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // Toggle Email / Telefone
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppTheme.background,
-                              borderRadius: BorderRadius.circular(12),
+                          const Text(
+                            'Entrar com email',
+                            style: TextStyle(
+                              color: AppTheme.ink,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
                             ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: _ModeToggleButton(
-                                    label: 'Email',
-                                    icon: Icons.email_outlined,
-                                    isSelected: !_isPhoneMode,
-                                    onTap: () => setState(() => _isPhoneMode = false),
-                                  ),
-                                ),
-                                Expanded(
-                                  child: _ModeToggleButton(
-                                    label: 'Telefone',
-                                    icon: Icons.phone_outlined,
-                                    isSelected: _isPhoneMode,
-                                    onTap: () => setState(() => _isPhoneMode = true),
-                                  ),
-                                ),
-                              ],
-                            ),
+                            textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 20),
-                          // Campo Email ou Telefone
-                          if (!_isPhoneMode) ...[
-                            TextFormField(
-                              controller: _emailController,
-                              keyboardType: TextInputType.emailAddress,
-                              textInputAction: TextInputAction.next,
-                              decoration: InputDecoration(
-                                labelText: 'Email',
-                                hintText: 'voce@exemplo.com',
-                                prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.muted),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.background,
+                          // Email
+                          TextFormField(
+                            controller: _emailController,
+                            keyboardType: TextInputType.emailAddress,
+                            textInputAction: TextInputAction.next,
+                            decoration: InputDecoration(
+                              labelText: 'Email',
+                              hintText: 'voce@exemplo.com',
+                              prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.muted),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: AppTheme.line),
                               ),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Informe seu email';
-                                }
-                                final emailRegex = RegExp(
-                                  r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+"
-                                  r"@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
-                                  r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$",
-                                );
-                                if (!emailRegex.hasMatch(value.trim())) {
-                                  return 'Email inválido';
-                                }
-                                return null;
-                              },
-                            ),
-                            const SizedBox(height: 16),
-                            // Senha
-                            TextFormField(
-                              controller: _passwordController,
-                              obscureText: _obscurePassword,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _signInWithEmail(),
-                              decoration: InputDecoration(
-                                labelText: 'Senha',
-                                hintText: '••••••••',
-                                prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.muted),
-                                suffixIcon: IconButton(
-                                  icon: Icon(
-                                    _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
-                                    color: AppTheme.muted,
-                                  ),
-                                  onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
-                                ),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.background,
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: AppTheme.line),
                               ),
-                              validator: (value) {
-                                if (value == null || value.isEmpty) {
-                                  return 'Informe sua senha';
-                                }
-                                if (value.length < 6) {
-                                  return 'A senha deve ter pelo menos 6 caracteres';
-                                }
-                                return null;
-                              },
-                            ),
-                          ] else ...[
-                            TextFormField(
-                              controller: _phoneController,
-                              keyboardType: TextInputType.phone,
-                              textInputAction: TextInputAction.done,
-                              onFieldSubmitted: (_) => _signInWithPhone(),
-                              onChanged: (value) {
-                                _phoneController.value = _phoneController.value.copyWith(
-                                  text: _formatPhoneInput(value),
-                                  selection: TextSelection.collapsed(offset: _formatPhoneInput(value).length),
-                                );
-                                if (_errorMessage != null) {
-                                  setState(() => _errorMessage = null);
-                                }
-                              },
-                              decoration: InputDecoration(
-                                labelText: 'Celular',
-                                hintText: '(11) 99999-9999',
-                                prefixIcon: const Icon(Icons.phone_outlined, color: AppTheme.muted),
-                                prefixText: '+55 ',
-                                prefixStyle: const TextStyle(color: AppTheme.ink, fontSize: 16, fontWeight: FontWeight.w600),
-                                border: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                enabledBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: BorderSide(color: AppTheme.line),
-                                ),
-                                focusedBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
-                                ),
-                                filled: true,
-                                fillColor: AppTheme.background,
-                                errorText: _errorMessage,
-                                errorStyle: const TextStyle(color: Color(0xFFB42318), fontWeight: FontWeight.w600),
-                                errorBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(color: Color(0xFFF04438), width: 1.5),
-                                ),
-                                focusedErrorBorder: OutlineInputBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(color: Color(0xFFF04438), width: 2),
-                                ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
                               ),
-                              validator: (value) {
-                                if (value == null || value.trim().isEmpty) {
-                                  return 'Informe seu número de celular';
-                                }
-                                final digits = value.replaceAll(RegExp(r'\D'), '');
-                                if (digits.length < 10 || digits.length > 11) {
-                                  return 'Número inválido. Use (DDD) 99999-9999';
-                                }
-                                final ddd = int.tryParse(digits.substring(0, 2));
-                                if (ddd == null || ddd < 11 || ddd > 99) {
-                                  return 'DDD inválido';
-                                }
-                                return null;
-                              },
+                              filled: true,
+                              fillColor: AppTheme.background,
                             ),
-                          ],
+                            validator: (value) {
+                              if (value == null || value.trim().isEmpty) {
+                                return 'Informe seu email';
+                              }
+                              final emailRegex = RegExp(
+                                r"^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+"
+                                r"@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?"
+                                r"(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+$",
+                              );
+                              if (!emailRegex.hasMatch(value.trim())) {
+                                return 'Email inválido';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 16),
+                          // Senha
+                          TextFormField(
+                            controller: _passwordController,
+                            obscureText: _obscurePassword,
+                            textInputAction: TextInputAction.done,
+                            onFieldSubmitted: (_) => _signInWithEmail(),
+                            decoration: InputDecoration(
+                              labelText: 'Senha',
+                              hintText: '••••••••',
+                              prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.muted),
+                              suffixIcon: IconButton(
+                                icon: Icon(
+                                  _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                  color: AppTheme.muted,
+                                ),
+                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: AppTheme.line),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: BorderSide(color: AppTheme.line),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(14),
+                                borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
+                              ),
+                              filled: true,
+                              fillColor: AppTheme.background,
+                            ),
+                            validator: (value) {
+                              if (value == null || value.isEmpty) {
+                                return 'Informe sua senha';
+                              }
+                              if (value.length < 6) {
+                                return 'A senha deve ter pelo menos 6 caracteres';
+                              }
+                              return null;
+                            },
+                          ),
                           // Mensagem de erro
-                          if (_errorMessage != null && !_isPhoneMode) ...[
+                          if (_errorMessage != null) ...[
                             const SizedBox(height: 12),
                             Container(
                               padding: const EdgeInsets.all(12),
@@ -494,11 +329,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             ),
                           ],
                           const SizedBox(height: 20),
-                          // Botão Entrar
+                          // Botão Entrar com email
                           SizedBox(
                             height: 52,
                             child: ElevatedButton(
-                              onPressed: _isLoading ? null : (_isPhoneMode ? _signInWithPhone : _signInWithEmail),
+                              onPressed: _isLoading ? null : _signInWithEmail,
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: AppTheme.emeraldDark,
                                 foregroundColor: Colors.white,
@@ -512,8 +347,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       height: 24,
                                       child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white)),
                                     )
-                                  : Text(_isPhoneMode ? 'Enviar código SMS' : 'Entrar com email',
-                                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                                  : const Text('Entrar com email',
+                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                             ),
                           ),
                         ],
@@ -553,13 +388,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         onPressed: _isLoading ? null : _signInWithApple,
                         icon: const Icon(Icons.apple, size: 24, color: Colors.white),
                         tooltip: 'Continuar com Apple',
-                      ),
-                      const SizedBox(width: 16),
-                      // Telefone
-                      _SocialIconButton(
-                        onPressed: _isLoading ? null : _openPhoneLogin,
-                        icon: Icon(Icons.phone_outlined, size: 24, color: Colors.white.withValues(alpha: 0.9)),
-                        tooltip: 'Entrar com Celular',
                       ),
                     ],
                   ),
@@ -608,44 +436,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ],
               ),
             ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Botão de toggle para alternar entre Email e Telefone
-class _ModeToggleButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _ModeToggleButton({
-    required this.label,
-    required this.icon,
-    required this.isSelected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: isSelected ? AppTheme.emeraldDark : Colors.transparent,
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(icon, size: 20, color: isSelected ? Colors.white : AppTheme.muted),
-              const SizedBox(width: 8),
-              Text(label, style: TextStyle(color: isSelected ? Colors.white : AppTheme.muted, fontWeight: FontWeight.w700, fontSize: 14)),
-            ],
           ),
         ),
       ),

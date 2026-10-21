@@ -1,11 +1,21 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/supabase_service.dart';
+
+// Simple debug print wrapper that works in all environments
+void _log(String message) {
+  // Using print instead of _log for compatibility with test environment
+  // In production, _log would be preferred for performance
+  print(message);
+}
 
 /// Resultado de operações de autenticação
 sealed class AuthResult {
@@ -14,15 +24,12 @@ sealed class AuthResult {
   T when<T>({
     required T Function(User? user) success,
     required T Function(String message, String? code) failure,
-    required T Function(String phone) pending,
   }) {
     switch (this) {
       case AuthSuccess(user: final u):
         return success(u);
       case AuthFailure(message: final m, code: final c):
         return failure(m, c);
-      case AuthPending(phone: final p):
-        return pending(p);
     }
   }
 }
@@ -38,17 +45,11 @@ class AuthFailure extends AuthResult {
   const AuthFailure(this.message, {this.code});
 }
 
-class AuthPending extends AuthResult {
-  final String phone;
-  const AuthPending(this.phone);
-}
-
 /// Tipos de provedor de autenticação suportados
 enum AuthProvider {
   email,
   google,
   apple,
-  phone,
 }
 
 /// Serviço centralizado de autenticação
@@ -96,6 +97,7 @@ class AuthService {
     } on AuthException catch (e) {
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e) {
+      _log('[AuthService] signInWithEmail unexpected error: $e');
       return const AuthFailure('Erro inesperado. Tente novamente.');
     }
   }
@@ -130,6 +132,7 @@ class AuthService {
     } on AuthException catch (e) {
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e) {
+      _log('[AuthService] signUpWithEmail unexpected error: $e');
       return const AuthFailure('Erro inesperado. Tente novamente.');
     }
   }
@@ -168,8 +171,11 @@ class AuthService {
       }
       return const AuthFailure('Falha ao autenticar com Google no Supabase.');
     } on AuthException catch (e) {
+      _log('[AuthService] signInWithGoogle AuthException: ${e.message} (code: ${e.code})');
       return AuthFailure(_translateAuthError(e.message), code: e.code);
-    } catch (e) {
+    } catch (e, stackTrace) {
+      _log('[AuthService] signInWithGoogle unexpected error: $e');
+      _log('[AuthService] Stack trace: $stackTrace');
       return AuthFailure('Erro no login com Google: $e');
     }
   }
@@ -182,11 +188,17 @@ class AuthService {
             'Modo offline. Conecte-se à internet para autenticar.');
       }
 
+      _log('[AuthService] Starting Apple Sign-In flow...');
+
       // 1. Gera nonce para segurança
       final rawNonce = _generateNonce();
       final nonce = _sha256(rawNonce);
 
+      _log('[AuthService] Generated nonce (raw): $rawNonce');
+      _log('[AuthService] Generated nonce (sha256): $nonce');
+
       // 2. Inicia o fluxo do Apple Sign-In
+      _log('[AuthService] Requesting Apple ID credential...');
       final credential = await SignInWithApple.getAppleIDCredential(
         scopes: [
           AppleIDAuthorizationScopes.email,
@@ -195,85 +207,57 @@ class AuthService {
         nonce: nonce,
       );
 
+      _log('[AuthService] Received Apple credential:');
+      _log('[AuthService]   userIdentifier: ${credential.userIdentifier}');
+      _log('[AuthService]   email: ${credential.email}');
+      _log('[AuthService]   givenName: ${credential.givenName}');
+      _log('[AuthService]   familyName: ${credential.familyName}');
+      _log('[AuthService]   identityToken: ${credential.identityToken != null ? 'PRESENT (${credential.identityToken!.length} chars)' : 'NULL'}');
+      _log('[AuthService]   authorizationCode: ${credential.authorizationCode != null ? 'PRESENT' : 'NULL'}');
+
       final identityToken = credential.identityToken;
       if (identityToken == null) {
-        return const AuthFailure('Não foi possível obter o token da Apple.');
+        _log('[AuthService] ERROR: identityToken is null!');
+        return const AuthFailure('Não foi possível obter o token da Apple. Tente novamente.');
       }
 
       // 3. Autentica no Supabase com o Identity Token + nonce
+      _log('[AuthService] Calling Supabase signInWithIdToken (Apple)...');
       final response = await SupabaseService.client.auth.signInWithIdToken(
         provider: OAuthProvider.apple,
         idToken: identityToken,
         nonce: rawNonce,
       );
 
-      if (response.user != null) {
-        return AuthSuccess(response.user!);
-      }
-      return const AuthFailure('Falha ao autenticar com Apple no Supabase.');
-    } on AuthException catch (e) {
-      return AuthFailure(_translateAuthError(e.message), code: e.code);
-    } catch (e) {
-      return AuthFailure('Erro no login com Apple: $e');
-    }
-  }
-
-  /// Envia OTP por SMS
-  Future<AuthResult> sendPhoneOTP({required String phone}) async {
-    try {
-      if (!SupabaseService.isReady) {
-        return const AuthFailure(
-            'Modo offline. Conecte-se à internet para autenticar.');
-      }
-
-      // Normaliza o número para formato E.164
-      final normalizedPhone = _normalizePhone(phone);
-
-      await SupabaseService.client.auth.signInWithOtp(
-        phone: normalizedPhone,
-        // Opcional: channel pode ser 'sms' ou 'whatsapp'
-        // channel: OtpChannel.sms,
-      );
-
-      return AuthPending(normalizedPhone);
-    } on AuthException catch (e) {
-      return AuthFailure(_translateAuthError(e.message), code: e.code);
-    } catch (e) {
-      return AuthFailure('Erro ao enviar SMS: $e');
-    }
-  }
-
-  /// Verifica OTP recebido por SMS
-  Future<AuthResult> verifyPhoneOTP({
-    required String phone,
-    required String token,
-  }) async {
-    try {
-      if (!SupabaseService.isReady) {
-        return const AuthFailure(
-            'Modo offline. Conecte-se à internet para autenticar.');
-      }
-
-      final response = await SupabaseService.client.auth.verifyOTP(
-        phone: phone,
-        token: token,
-        type: OtpType.sms,
-      );
+      _log('[AuthService] Supabase response:');
+      _log('[AuthService]   user: ${response.user?.id ?? 'NULL'}');
+      _log('[AuthService]   session: ${response.session != null ? 'PRESENT' : 'NULL'}');
 
       if (response.user != null) {
+        _log('[AuthService] Apple login successful for user: ${response.user!.id}');
         return AuthSuccess(response.user!);
       }
-      return const AuthFailure('Código inválido ou expirado.');
-    } on AuthException catch (e) {
+      _log('[AuthService] ERROR: Supabase returned null user');
+      return const AuthFailure('Falha ao autenticar com Apple no Supabase. Tente novamente.');
+    } on AuthException catch (e, stackTrace) {
+      _log('[AuthService] signInWithApple AuthException:');
+      _log('  message: ${e.message}');
+      _log('  code: ${e.code}');
+      _log('  stackTrace: $stackTrace');
       return AuthFailure(_translateAuthError(e.message), code: e.code);
-    } catch (e) {
-      return AuthFailure('Erro ao verificar código: $e');
+    } on SignInWithAppleAuthorizationException catch (e, stackTrace) {
+      _log('[AuthService] signInWithApple SignInWithAppleAuthorizationException:');
+      _log('  code: ${e.code}');
+      _log('  message: ${e.message}');
+      _log('  stackTrace: $stackTrace');
+      return AuthFailure('Erro na autorização da Apple: ${e.message}', code: e.code.toString());
+    } catch (e, stackTrace) {
+      _log('[AuthService] signInWithApple unexpected error:');
+      _log('  error: $e');
+      _log('  type: ${e.runtimeType}');
+      _log('  stackTrace: $stackTrace');
+      return AuthFailure('Erro inesperado no login com Apple: $e');
     }
-  }
-
-  /// Reenvia OTP (com rate limiting interno do Supabase)
-  Future<AuthResult> resendPhoneOTP({required String phone}) async {
-    return sendPhoneOTP(phone: phone);
   }
 
   /// Recuperação de senha
@@ -292,6 +276,7 @@ class AuthService {
     } on AuthException catch (e) {
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e) {
+      _log('[AuthService] resetPassword unexpected error: $e');
       return const AuthFailure('Erro ao enviar email de recuperação.');
     }
   }
@@ -311,6 +296,7 @@ class AuthService {
     } on AuthException catch (e) {
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e) {
+      _log('[AuthService] updatePassword unexpected error: $e');
       return const AuthFailure('Erro ao atualizar senha.');
     }
   }
@@ -339,6 +325,7 @@ class AuthService {
     } on AuthException catch (e) {
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e) {
+      _log('[AuthService] deleteAccount unexpected error: $e');
       return const AuthFailure('Erro ao excluir conta.');
     }
   }
@@ -379,30 +366,13 @@ class AuthService {
     if (lower.contains('signup disabled') || lower.contains('not allowed')) {
       return 'Cadastro não permitido no momento.';
     }
-    if (lower.contains('phone') && lower.contains('invalid')) {
-      return 'Número de telefone inválido.';
-    }
-    if (lower.contains('otp') &&
-        (lower.contains('expired') || lower.contains('invalid'))) {
-      return 'Código inválido ou expirado.';
-    }
     if (lower.contains('provider') && lower.contains('disabled')) {
       return 'Este método de login não está habilitado. Configure no Supabase.';
     }
-    return 'Não foi possível completar a operação. Tente novamente.';
-  }
-
-  String _normalizePhone(String phone) {
-    // Remove tudo que não é dígito
-    String digits = phone.replaceAll(RegExp(r'\D'), '');
-
-    // Se não começa com código do país, assume Brasil (+55)
-    if (!digits.startsWith('55')) {
-      digits = '55$digits';
+    if (lower.contains('invalid_grant') || lower.contains('invalid_token')) {
+      return 'Sessão inválida ou expirada. Faça login novamente.';
     }
-
-    // Garante formato E.164
-    return '+$digits';
+    return 'Não foi possível completar a operação. Tente novamente.';
   }
 
   String _generateNonce() {
@@ -413,15 +383,9 @@ class AuthService {
   }
 
   String _sha256(String input) {
-    // Implementação simples usando crypto
-    // Para produção, use package:crypto
-    var bytes = input.codeUnits;
-    var hash = 0;
-    for (var byte in bytes) {
-      hash = ((hash << 5) - hash) + byte;
-      hash = hash & hash;
-    }
-    return hash.abs().toRadixString(16).padLeft(32, '0');
+    var bytes = utf8.encode(input);
+    var digest = sha256.convert(bytes);
+    return digest.toString();
   }
 }
 

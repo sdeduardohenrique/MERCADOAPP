@@ -59,9 +59,13 @@ class AuthService {
   static final AuthService instance = AuthService._();
 
   // Configuração do Google Sign-In com serverClientId do ambiente
+  // IMPORTANTE: serverClientId deve ser o Web Client ID do Google Cloud Console
+  // (OAuth 2.0 Client ID tipo "Web application", NÃO Android)
   final GoogleSignIn _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile', 'openid'],
     serverClientId: const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID'),
+    // Força a exibição da tela de seleção de conta
+    forceCodeForRefreshToken: true,
   );
 
   /// Verifica se há uma sessão ativa
@@ -138,7 +142,8 @@ class AuthService {
     }
   }
 
-  /// Login com Google (OAuth)
+  /// Login com Google (OAuth) - Seguindo documentação Supabase
+  /// https://supabase.com/docs/guides/auth/social-sign-in/auth-google
   Future<AuthResult> signInWithGoogle() async {
     try {
       if (!SupabaseService.isReady) {
@@ -146,38 +151,67 @@ class AuthService {
             'Modo offline. Conecte-se à internet para autenticar.');
       }
 
-      // 1. Inicia o fluxo do Google Sign-In
+      _log('[AuthService] Starting Google Sign-In flow...');
+
+      // 1. Verifica se serverClientId está configurado
+      final serverClientId = const String.fromEnvironment('GOOGLE_WEB_CLIENT_ID');
+      if (serverClientId.isEmpty) {
+        _log('[AuthService] ERROR: GOOGLE_WEB_CLIENT_ID não configurado (--dart-define)');
+        return const AuthFailure(
+            'Configuração do Google incompleta. Contate o suporte.');
+      }
+      _log('[AuthService] Using serverClientId: $serverClientId');
+
+      // 2. Inicia o fluxo do Google Sign-In
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) {
+        _log('[AuthService] Google Sign-In canceled by user');
         return const AuthFailure('Login com Google cancelado.');
       }
 
-      // 2. Obtém o ID Token
+      _log('[AuthService] Google user: ${googleUser.email}');
+
+      // 3. Obtém o ID Token (necessário para Supabase)
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
       final String? idToken = googleAuth.idToken;
 
       if (idToken == null) {
-        return const AuthFailure('Não foi possível obter o token do Google.');
+        _log('[AuthService] ERROR: idToken is null');
+        return const AuthFailure('Não foi possível obter o token do Google. Tente novamente.');
       }
 
-      // 3. Autentica no Supabase com o ID Token
+      _log('[AuthService] Got ID Token (length: ${idToken.length})');
+
+      // 4. Autentica no Supabase com o ID Token
+      _log('[AuthService] Calling Supabase signInWithIdToken (Google)...');
       final response = await SupabaseService.client.auth.signInWithIdToken(
         provider: OAuthProvider.google,
         idToken: idToken,
       );
 
+      _log('[AuthService] Supabase response:');
+      _log('[AuthService]   user: ${response.user?.id ?? 'NULL'}');
+      _log('[AuthService]   session: ${response.session != null ? 'PRESENT' : 'NULL'}');
+
       if (response.user != null) {
+        _log('[AuthService] Google login successful for user: ${response.user!.id}');
         return AuthSuccess(response.user!);
       }
-      return const AuthFailure('Falha ao autenticar com Google no Supabase.');
-    } on AuthException catch (e) {
-      _log('[AuthService] signInWithGoogle AuthException: ${e.message} (code: ${e.code})');
+      _log('[AuthService] ERROR: Supabase returned null user');
+      return const AuthFailure('Falha ao autenticar com Google no Supabase. Tente novamente.');
+    } on AuthException catch (e, stackTrace) {
+      _log('[AuthService] signInWithGoogle AuthException:');
+      _log('  message: ${e.message}');
+      _log('  code: ${e.code}');
+      _log('  stackTrace: $stackTrace');
       return AuthFailure(_translateAuthError(e.message), code: e.code);
     } catch (e, stackTrace) {
-      _log('[AuthService] signInWithGoogle unexpected error: $e');
-      _log('[AuthService] Stack trace: $stackTrace');
-      return AuthFailure('Erro no login com Google: $e');
+      _log('[AuthService] signInWithGoogle unexpected error:');
+      _log('  error: $e');
+      _log('  type: ${e.runtimeType}');
+      _log('  stackTrace: $stackTrace');
+      return AuthFailure('Erro inesperado no login com Google: $e');
     }
   }
 

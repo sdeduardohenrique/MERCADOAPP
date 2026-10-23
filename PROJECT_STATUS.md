@@ -244,7 +244,7 @@ Atualizar com `npx skills add flutter/skills --skill '*' --agent universal`.
 Assinatura: chave **debug** (suficiente para testes; trocar antes de publicar).
 Label exibido no Android: **SomaAí** (`applicationId` ainda é `com.example.mercado_app`).
 Versão instalada: `1.0.0` (`versionCode 4004`).
-SHA-256 do ARM64: `bb99293b922b6ed81aeb5d710fe26273c65561d4f7bbb1221df86bdf78e4d612`.
+SHA-256 do ARM64: `96426c08a1ff68d6a7ba90ae79c4fc4cf30de66c0f95502bf9a2a30e3d34b16f`.
 
 ### Instalação no Redmi Note 11 (`6D4TQKXGONGAU8FE`)
 

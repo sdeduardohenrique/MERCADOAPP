@@ -1,8 +1,8 @@
 # SomaAí — Project Status & Architecture
 
-**Last Updated:** October 21, 2026
+**Last Updated:** October 24, 2026
 
-**Status:** ✅ APK release ARM64 (41,9 MB) validado no Redmi Note 11 — **compra com ou sem mercado**, filtros de período no Dashboard, **Comunidade real** (cidade/raio, foto, detalhes e rota) e **carrinho completo** (edição, unidade/peso, prova de prateleira com miniatura e card de orçamento dinâmico), 3 abas, R8 e câmera estáveis
+**Status:** ✅ APK release ARM64 (42,7 MB) validado no Redmi Note 11 com **fluxo híbrido de seleção de mercado** (PostGIS 100 m + fallback TomTom Places Search API v3 com upsert silencioso e badge de origem), **autenticação com isolamento por usuário** (Google OAuth + Email/Senha + Logout completo com invalidação de Riverpod), **eliminação de mocks em compras/perfil** e 101 testes automatizados passando.
 
 ---
 
@@ -14,6 +14,8 @@
 - Carrinho em tempo real com total automático
 - Rede de comparação de preços da comunidade (estilo Waze/Cuponomia)
 - Backend Supabase com geolocalização (PostGIS)
+- Fallback externo de busca de estabelecimentos via TomTom Places Search API v3 (Orbis)
+
 
 ---
 
@@ -740,26 +742,24 @@ A câmera abre apenas por `Navigator.push` a partir do CTA.
 
 ## 📝 Próximos passos imediatos
 
-1. Trocar `applicationId` (`com.example.mercado_app`) e gerar keystore própria
-   antes de qualquer distribuição; remover a assinatura debug.
-2. Implementar entrada por voz (`speech_to_text`) e o checkout fiscal.
-3. Corrigir a conversão `CameraImage → InputImage` (NV21 por plataforma) para
-   melhorar o OCR de etiquetas reais; a entrada manual cobre os testes até lá.
-4. Avaliar a remoção dos dados demo no primeiro arranque de produção
-   (`PurchaseHistoryNotifier` semeia 4 compras apenas quando o storage está vazio).
+1. **Refatoração do Módulo de Localização & Busca Dinâmica (Roadmap Prioritário)**:
+   - **Pilar 1 (Localização Global)**: Migrar todo o consumo de GPS para `location_provider` Riverpod dedicado com `Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best)`, descartando `getLastKnownPosition` e cache antigo para eliminar falso positivo de local.
+   - **Pilar 2 (Raio Dinâmico na TomTom)**: Adicionar controle visual de raio (ChoiceChips/Dropdown: 1 km, 3 km, 5 km, 10 km) com valor padrão de 3-5 km e passar coordenadas âncora + filtro circular no `TomTomService.searchByName`.
+   - **Pilar 3 (Modo Visitante 100% Local)**: Onboarding com dialog perguntando apelido ("Como você quer ser chamado?") e isolamento de compras/carrinho estritamente em storage local, sem requisições Supabase.
+   - **Pilar 4 (Bloqueio da Comunidade para Visitante)**: Empty state com ícone de cadeado amigável explicando a necessidade de conta gratuita e botão de CTA verde para ir ao cadastro.
+2. Trocar `applicationId` (`com.example.mercado_app` / `com.somaaiapp`) e gerar keystore própria para publicação na Play Store.
+3. Aplicar consolidação final de RLS policies (`tools/rls_isolation.sql`).
+4. Implementar entrada por voz (`speech_to_text`) e o checkout fiscal.
 
 ---
 
 ## 📊 Métricas
 
-- Build release ARM64: ~20–60 s (cache quente, split-per-abi)
-- APK release ARM64: **41,9 MB**
-- APK debug ARM64: 186 MB (kernel JIT + libs debug)
-- Testes: **85 passando** (`flutter test`)
-- Análise estática: 0 erros (`dart analyze lib test integration_test`)
-- Preview: 15 fps; processamento: **1 frame a cada 1000 ms**, um por vez
-- Scanner no aparelho: ~3–7% de CPU e ~356–368 MB de memória residente
-- Fila offline planejada: até 100 scans
+- Build release ARM64: ~30–60 s (`tools/build_apk.sh`, split-per-abi)
+- APK release ARM64: **42,7 MB** (`somaai-arm64-release.apk`)
+- Testes: **101 passando** (`flutter test`)
+- Análise estática: 0 erros / 0 warnings (`dart analyze lib test`)
+- Cota TomTom: consumo sob demanda apenas em fallback (quando PostGIS não encontra estabelecimentos num raio de 100m)
 
 ---
 

@@ -5,14 +5,13 @@ import 'package:flutter_svg/flutter_svg.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../shell/presentation/app_shell.dart';
 import '../domain/auth_service.dart';
-import 'login_screen.dart';
 
 /// Tela de cadastro de nova conta.
 ///
 /// Permite criar conta com:
 /// - Email e senha
 /// - Google OAuth
-/// - Apple OAuth
+/// - Continuar como visitante (modo offline)
 class RegisterScreen extends ConsumerStatefulWidget {
   const RegisterScreen({super.key});
 
@@ -112,36 +111,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
     }
   }
 
-  Future<void> _signUpWithApple() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      final result = await authService.signInWithApple();
-
-      if (!mounted) return;
-
-      result.when(
-        success: (user) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const AppShell()),
-            (route) => false,
-          );
-        },
-        failure: (message, code) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = message;
-          });
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Erro no cadastro com Apple.';
-      });
-    }
+  void _openPhoneRegistration() {
+    // TODO: Implementar registro por telefone
   }
 
   @override
@@ -395,8 +366,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                                       height: 24,
                                       child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white)),
                                     )
-                                  : const Text('Criar conta com email',
-                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                                  : const Text('Criar conta com email', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                             ),
                           ),
                         ],
@@ -431,11 +401,11 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
                         tooltip: 'Cadastrar com Google',
                       ),
                       const SizedBox(width: 16),
-                      // Apple
+                      // Telefone
                       _SocialIconButton(
-                        onPressed: _isLoading ? null : _signUpWithApple,
-                        icon: const Icon(Icons.apple, size: 24, color: Colors.white),
-                        tooltip: 'Cadastrar com Apple',
+                        onPressed: _isLoading ? null : _openPhoneRegistration,
+                        icon: Icon(Icons.phone_outlined, size: 24, color: Colors.white.withValues(alpha: 0.9)),
+                        tooltip: 'Cadastrar com Celular',
                       ),
                     ],
                   ),

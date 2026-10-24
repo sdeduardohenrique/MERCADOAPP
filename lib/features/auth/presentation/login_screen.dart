@@ -6,14 +6,12 @@ import '../../../core/theme/app_theme.dart';
 import '../../shell/presentation/app_shell.dart';
 import '../domain/auth_service.dart';
 import 'forgot_password_screen.dart';
-import 'register_screen.dart';
 
 /// Tela de login/entrada do app com suporte a múltiplos provedores.
 ///
 /// Permite entrar com:
 /// - Email e senha
 /// - Google OAuth
-/// - Apple OAuth
 /// - Continuar como visitante (modo offline)
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -105,38 +103,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       setState(() {
         _isLoading = false;
         _errorMessage = 'Erro no login com Google.';
-      });
-    }
-  }
-
-  Future<void> _signInWithApple() async {
-    setState(() => _isLoading = true);
-
-    try {
-      final authService = ref.read(authServiceProvider);
-      final result = await authService.signInWithApple();
-
-      if (!mounted) return;
-
-      result.when(
-        success: (user) {
-          Navigator.of(context).pushAndRemoveUntil(
-            MaterialPageRoute(builder: (_) => const AppShell()),
-            (route) => false,
-          );
-        },
-        failure: (message, code) {
-          setState(() {
-            _isLoading = false;
-            _errorMessage = message;
-          });
-        },
-      );
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = 'Erro no login com Apple.';
       });
     }
   }
@@ -347,8 +313,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                       height: 24,
                                       child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white)),
                                     )
-                                  : const Text('Entrar com email',
-                                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                                  : const Text('Entrar com email', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                             ),
                           ),
                         ],
@@ -382,13 +347,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         icon: _GoogleLogo(size: 24),
                         tooltip: 'Continuar com Google',
                       ),
-                      const SizedBox(width: 16),
-                      // Apple
-                      _SocialIconButton(
-                        onPressed: _isLoading ? null : _signInWithApple,
-                        icon: const Icon(Icons.apple, size: 24, color: Colors.white),
-                        tooltip: 'Continuar com Apple',
-                      ),
                     ],
                   ),
                   const SizedBox(height: 20),
@@ -417,22 +375,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                       style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13.5, fontWeight: FontWeight.w600),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  // Link "Criar conta"
-                  TextButton(
-                    onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const RegisterScreen())),
-                    child: Text(
-                      'Criar conta',
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.85),
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w600,
-                        decoration: TextDecoration.underline,
-                        decorationColor: Colors.white.withValues(alpha: 0.85),
-                      ),
-                    ),
-                  ),
+                  
                 ],
               ),
             ),

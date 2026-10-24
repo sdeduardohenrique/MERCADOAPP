@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/services/supabase_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
 import '../../../core/widgets/somaai_logo.dart';
+import '../../auth/presentation/login_screen.dart';
+import '../../cart/presentation/providers/cart_provider.dart';
+import '../../cart/presentation/providers/purchase_budget_provider.dart';
 import '../../community_alerts/presentation/providers/alert_preferences_provider.dart';
 import '../../home/presentation/providers/purchase_history_provider.dart';
+import '../../home/presentation/providers/dashboard_period_provider.dart';
 import 'providers/profile_provider.dart';
 
 /// Aba Perfil: dados do utilizador, estatísticas e preferências.
@@ -163,10 +168,10 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                   subtitle: 'Como usar o SomaAí',
                   onTap: () => _showSimpleDialog(
                     title: 'Como usar',
-                    message: '1. Toque em “Iniciar nova compra”.\n'
+                    message: '1. Toque em "Iniciar nova compra".\n'
                         '2. Adicione itens pela câmera, manual ou voz.\n'
                         '3. Ajuste as quantidades no carrinho.\n'
-                        '4. Toque em “Finalizar Compra” para guardar no histórico.',
+                        '4. Toque em "Finalizar Compra" para guardar no histórico.',
                   ),
                 ),
                 const Divider(height: 1, indent: 60),
@@ -180,6 +185,15 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                         'Uma calculadora de supermercado que soma os preços '
                         'pela câmera e avisa onde o vizinho encontrou mais barato.',
                   ),
+                ),
+                const Divider(height: 1, indent: 60),
+                _SettingTile(
+                  icon: Icons.logout_rounded,
+                  iconColor: AppTheme.red,
+                  title: 'Sair da conta',
+                  subtitle: 'Encerrar sessão e limpar dados locais',
+                  titleColor: AppTheme.red,
+                  onTap: _confirmLogout,
                 ),
                 const Divider(height: 1, indent: 60),
                 _SettingTile(
@@ -237,6 +251,67 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           const SnackBar(content: Text('Histórico limpo.')),
         );
     }
+  }
+
+  Future<void> _confirmLogout() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Sair da conta?'),
+        content: const Text(
+          'Ao sair da conta, todos os dados locais serão limpos. '
+          'Você voltará para a tela de login.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: FilledButton.styleFrom(backgroundColor: AppTheme.red),
+            child: const Text('Sair'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true && mounted) {
+      // 1. Sign out from Supabase
+      await SupabaseService.signOut();
+
+      // 2. Invalidate ALL Riverpod providers to clear state
+      ref.invalidate(purchaseHistoryProvider);
+      ref.invalidate(cartProvider);
+      ref.invalidate(purchaseBudgetProvider);
+      ref.invalidate(dashboardPeriodProvider);
+      ref.invalidate(alertPreferencesProvider);
+      ref.invalidate(userProfileProvider);
+
+      // Navigate to login screen (AuthGate will handle redirect)
+      if (mounted) {
+        Navigator.of(context).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    }
+  }
+
+  void _showSimpleDialog({required String title, required String message}) {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: Text(message, style: const TextStyle(height: 1.5)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Entendi'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showDistanceSheet(int current) {
@@ -302,22 +377,6 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
           ),
         );
       },
-    );
-  }
-
-  void _showSimpleDialog({required String title, required String message}) {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(title),
-        content: Text(message, style: const TextStyle(height: 1.5)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Entendi'),
-          ),
-        ],
-      ),
     );
   }
 }

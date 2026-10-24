@@ -5,13 +5,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../../../core/models/purchase.dart';
-import '../../data/demo_purchases.dart';
 import '../../domain/purchase_history_sync_service.dart';
 
 /// Histórico de compras persistido localmente (SharedPreferences).
 ///
-/// No primeiro arranque semeia dados de demonstração para o Dashboard não
-/// nascer vazio. O utilizador pode limpar tudo na aba Perfil.
+/// O utilizador pode limpar tudo na aba Perfil.
+/// Sem dados de demonstração — a conta começa 100% limpa.
 class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
   PurchaseHistoryNotifier({PurchaseHistorySyncService? syncService})
       : _syncService = syncService ?? PurchaseHistorySyncService(),
@@ -31,28 +30,27 @@ class PurchaseHistoryNotifier extends StateNotifier<List<Purchase>> {
       final prefs = await SharedPreferences.getInstance();
       final raw = prefs.getString(storageKey);
 
-      if (raw == null) {
-        state = DemoPurchases.build();
-        await _persist();
-      } else {
-        final decoded = jsonDecode(raw);
-        if (decoded is List) {
-          state = decoded
-              .whereType<Map<String, dynamic>>()
-              .map(Purchase.fromJson)
-              .toList()
-            ..sort((a, b) => b.date.compareTo(a.date));
-        }
+      if (raw == null || raw.isEmpty) {
+        // Sem dados salvos — começa com lista vazia (sem mocks)
+        state = const [];
+        _loaded = true;
+        return;
       }
+
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        state = decoded
+            .whereType<Map<String, dynamic>>()
+            .map(Purchase.fromJson)
+            .toList()
+          ..sort((a, b) => b.date.compareTo(a.date));
+      }
+      _loaded = true;
     } catch (e, stack) {
-      // Ambiente de teste/sem plugin: mantém os dados de demonstração em memória.
       debugPrint('[SomaAí] Histórico indisponível: $e');
       debugPrintStack(stackTrace: stack);
-      if (state.isEmpty) state = DemoPurchases.build();
-    } finally {
-      if (mounted) {
-        _loaded = true;
-      }
+      state = const [];
+      _loaded = true;
     }
   }
 

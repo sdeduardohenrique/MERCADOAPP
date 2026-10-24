@@ -5,6 +5,8 @@ import 'package:equatable/equatable.dart';
 /// `isRemoto` distingue um mercado persistido no Supabase de um cadastro
 /// criado localmente quando o app está sem conexão. A compra sempre guarda o
 /// nome; o `id` remoto só é enviado à nuvem quando existe.
+/// `externalId` armazena o ID externo (ex: place_id da TomTom Places API)
+/// para deduplicação entre fontes de dados.
 class Mercado extends Equatable {
   final String id;
   final String nome;
@@ -17,6 +19,7 @@ class Mercado extends Equatable {
   final String? chain;
   final bool verificado;
   final bool isRemoto;
+  final String? externalId; // ID externo (ex: place_id da TomTom)
 
   const Mercado({
     required this.id,
@@ -30,6 +33,7 @@ class Mercado extends Equatable {
     this.chain,
     this.verificado = false,
     this.isRemoto = true,
+    this.externalId,
   });
 
   bool get temCoordenadas => latitude != null && longitude != null;
@@ -62,6 +66,7 @@ class Mercado extends Equatable {
       chain: json['chain'] as String?,
       verificado: (json['verificado'] ?? json['verified'] ?? false) as bool,
       isRemoto: true,
+      externalId: json['external_id'] as String? ?? json['externalId'] as String?,
     );
   }
 
@@ -77,6 +82,7 @@ class Mercado extends Equatable {
         'chain': chain,
         'verificado': verificado,
         'is_remoto': isRemoto,
+        'external_id': externalId,
       };
 
   Mercado copyWith({
@@ -91,6 +97,7 @@ class Mercado extends Equatable {
     String? chain,
     bool? verificado,
     bool? isRemoto,
+    String? externalId,
   }) {
     return Mercado(
       id: id ?? this.id,
@@ -104,6 +111,7 @@ class Mercado extends Equatable {
       chain: chain ?? this.chain,
       verificado: verificado ?? this.verificado,
       isRemoto: isRemoto ?? this.isRemoto,
+      externalId: externalId ?? this.externalId,
     );
   }
 
@@ -126,5 +134,6 @@ class Mercado extends Equatable {
         chain,
         verificado,
         isRemoto,
+        externalId,
       ];
 }

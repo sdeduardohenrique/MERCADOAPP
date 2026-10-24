@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../core/services/supabase_service.dart';
 import '../../../core/theme/app_theme.dart';
+import '../domain/auth_service.dart';
 
 /// Tela de recuperação de senha.
 ///
@@ -13,8 +12,7 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
   const ForgotPasswordScreen({super.key});
 
   @override
-  ConsumerState<ForgotPasswordScreen> createState() =>
-      _ForgotPasswordScreenState();
+  ConsumerState<ForgotPasswordScreen> createState() => _ForgotPasswordScreenState();
 }
 
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
@@ -41,49 +39,33 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     });
 
     try {
-      await SupabaseService.client.auth.resetPasswordForEmail(
-        _emailController.text.trim(),
-        redirectTo: 'somaai://reset-password',
+      final authService = ref.read(authServiceProvider);
+      final result = await authService.resetPassword(email: _emailController.text.trim());
+
+      if (!mounted) return;
+
+      result.when(
+        success: (_) {
+          setState(() {
+            _isLoading = false;
+            _emailSent = true;
+            _successMessage = 'Email de recuperação enviado! Verifique sua caixa de entrada.';
+          });
+        },
+        failure: (message, code) {
+          setState(() {
+            _isLoading = false;
+            _errorMessage = message;
+          });
+        },
       );
-
-      if (!mounted) return;
-
-      setState(() {
-        _isLoading = false;
-        _emailSent = true;
-        _successMessage =
-            'Email de recuperação enviado! Verifique sua caixa de entrada.';
-      });
-    } on AuthException catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _isLoading = false;
-        _errorMessage = _translateAuthError(e.message);
-      });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Erro inesperado. Tente novamente.';
+        _errorMessage = 'Erro ao enviar email de recuperação.';
       });
     }
-  }
-
-  String _translateAuthError(String message) {
-    final lower = message.toLowerCase();
-    if (lower.contains('user not found') || lower.contains('not found')) {
-      return 'Nenhuma conta encontrada com este email.';
-    }
-    if (lower.contains('invalid email')) {
-      return 'Email inválido.';
-    }
-    if (lower.contains('rate limit') || lower.contains('too many requests')) {
-      return 'Muitas tentativas. Aguarde alguns minutos.';
-    }
-    if (lower.contains('network') || lower.contains('connection')) {
-      return 'Sem conexão. Verifique sua internet.';
-    }
-    return 'Não foi possível enviar o email. Tente novamente.';
   }
 
   @override
@@ -180,10 +162,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                               decoration: InputDecoration(
                                 labelText: 'Email',
                                 hintText: 'voce@exemplo.com',
-                                prefixIcon: const Icon(
-                                  Icons.email_outlined,
-                                  color: AppTheme.muted,
-                                ),
+                                prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.muted),
                                 border: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(14),
                                   borderSide: BorderSide(color: AppTheme.line),
@@ -194,10 +173,7 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                                 ),
                                 focusedBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(14),
-                                  borderSide: const BorderSide(
-                                    color: AppTheme.emeraldDark,
-                                    width: 2,
-                                  ),
+                                  borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
                                 ),
                                 filled: true,
                                 fillColor: AppTheme.background,
@@ -226,26 +202,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFFFDECEC),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: const Color(0xFFF04438),
-                                ),
+                                border: Border.all(color: const Color(0xFFF04438)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(
-                                    Icons.error_outline_rounded,
-                                    color: Color(0xFFB42318),
-                                    size: 20,
-                                  ),
+                                  const Icon(Icons.error_outline_rounded, color: Color(0xFFB42318), size: 20),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       _errorMessage!,
-                                      style: const TextStyle(
-                                        color: Color(0xFFB42318),
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                      style: const TextStyle(color: Color(0xFFB42318), fontSize: 13, fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ],
@@ -262,31 +228,16 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                                 backgroundColor: AppTheme.emeraldDark,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
-                                disabledBackgroundColor:
-                                    AppTheme.emeraldDark.withValues(alpha: 0.5),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                disabledBackgroundColor: AppTheme.emeraldDark.withValues(alpha: 0.5),
                               ),
                               child: _isLoading
                                   ? const SizedBox(
                                       width: 24,
                                       height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2.5,
-                                        valueColor: AlwaysStoppedAnimation(
-                                          Colors.white,
-                                        ),
-                                      ),
+                                      child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white)),
                                     )
-                                  : const Text(
-                                      'Enviar link de recuperação',
-                                      style: TextStyle(
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.w800,
-                                        letterSpacing: 0.3,
-                                      ),
-                                    ),
+                                  : const Text('Enviar link de recuperação', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                             ),
                           ),
                         ] else ...[
@@ -325,18 +276,9 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                                 backgroundColor: AppTheme.emeraldDark,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(14),
-                                ),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                               ),
-                              child: const Text(
-                                'Voltar ao login',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w800,
-                                  letterSpacing: 0.3,
-                                ),
-                              ),
+                              child: const Text('Voltar ao login', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
                             ),
                           ),
                         ],
@@ -344,21 +286,20 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
                     ),
                   ),
                   const SizedBox(height: 20),
-                  // Link para voltar ao login (se não enviado ainda)
-                  if (!_emailSent)
-                    TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: Text(
-                        'Voltar ao login',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 13.5,
-                          fontWeight: FontWeight.w600,
-                          decoration: TextDecoration.underline,
-                          decorationColor: Colors.white.withValues(alpha: 0.85),
-                        ),
+                  // Link para voltar ao login
+                  TextButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    child: Text(
+                      'Voltar ao login',
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w600,
+                        decoration: TextDecoration.underline,
+                        decorationColor: Colors.white.withValues(alpha: 0.85),
                       ),
                     ),
+                  ),
                 ],
               ),
             ),

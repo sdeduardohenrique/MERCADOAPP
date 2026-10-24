@@ -165,6 +165,42 @@ void main() {
     expect(result?.market?.id, _fallbackMarket.id);
   });
 
+  testWidgets('resultados da TomTom ganham selo e são selecionáveis',
+      (tester) async {
+    const external = Mercado(
+      id: 'local-externo',
+      nome: 'Mercado Externo',
+      latitude: -23.5506,
+      longitude: -46.6334,
+      distanciaMetros: 180,
+      externalId: 'tt-1',
+      isRemoto: false,
+    );
+
+    final container = ProviderContainer(
+      overrides: [
+        marketServiceProvider.overrideWithValue(
+          _service(nearby: const [external]),
+        ),
+      ],
+    );
+    addTearDown(container.dispose);
+    MarketSelectionResult? result;
+
+    await tester.pumpWidget(_sheetApp(container, (market) => result = market));
+    await tester.tap(find.text('Abrir mercado'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Mercado Externo'), findsOneWidget);
+    expect(find.text('TomTom'), findsOneWidget);
+
+    await tester.tap(find.text('Mercado Externo'));
+    await tester.pumpAndSettle();
+
+    // Sem Supabase inicializado (teste), seleciona o mercado local.
+    expect(result?.market?.externalId, 'tt-1');
+  });
+
   testWidgets('GPS negado não bloqueia: cadastro manual sem coordenadas',
       (tester) async {
     final container = ProviderContainer(

@@ -19,6 +19,7 @@ dependencies:
 
   # Backend - Supabase
   supabase_flutter: ^2.3.4
+  http: ^1.2.2
 
   # Camera & ML Vision
   camera: ^0.10.5+9
@@ -55,7 +56,6 @@ dependencies:
 
   # Authentication - Social & Phone
   google_sign_in: ^6.2.1
-  sign_in_with_apple: ^6.1.0
   pin_code_fields: ^8.0.1
 
 dev_dependencies:

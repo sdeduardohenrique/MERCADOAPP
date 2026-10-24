@@ -145,11 +145,13 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
     });
 
     try {
+      // Passo 1: apenas base interna (PostGIS, 100 m).
       final markets = await _service.findNearby(
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
         radiusMeters: 100,
         limit: 5,
+        includeExternal: false,
       );
       if (!mounted) return;
 
@@ -171,6 +173,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
     }
   }
 
+  /// Passo 2: base interna (5 km) + fallback TomTom Places.
   Future<void> _loadFallbackMarkets() async {
     final coordinates = _coordinates;
     if (coordinates == null) return;
@@ -267,11 +270,22 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
     });
   }
 
-  void _selectMarket(Mercado market) {
+  Future<void> _selectMarket(Mercado market) async {
     if (_selecting) return;
-    _selecting = true;
-    ref.read(selectedMarketProvider.notifier).select(market);
-    Navigator.of(context).pop(MarketSelectionResult.selected(market));
+    setState(() => _selecting = true);
+
+    var selected = market;
+
+    // Passo 3: mercado vindo da TomTom é salvo silenciosamente na base da
+    // comunidade. Se a nuvem falhar, seguimos com o dado local.
+    if (!market.isRemoto && (market.externalId?.isNotEmpty ?? false)) {
+      final persisted = await _service.persistExternalMarket(market);
+      selected = persisted.market;
+    }
+
+    if (!mounted) return;
+    ref.read(selectedMarketProvider.notifier).select(selected);
+    Navigator.of(context).pop(MarketSelectionResult.selected(selected));
   }
 
   void _skipMarket() {
@@ -634,6 +648,10 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
   }
 
   Widget _buildNearbySection() {
+    final temResultadosTomTom = _nearby.any(
+      (market) => market.externalId?.isNotEmpty ?? false,
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -669,7 +687,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
           )
         else if (_nearby.isEmpty)
           const _EmptyNearbyCard()
-        else
+        else ...[
           ..._nearby.map(
             (market) => Padding(
               padding: const EdgeInsets.only(bottom: 9),
@@ -679,6 +697,33 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
               ),
             ),
           ),
+          if (temResultadosTomTom)
+            Padding(
+              padding: const EdgeInsets.only(top: 2, bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.info_outline_rounded,
+                    size: 13,
+                    color: Color(0xFF9A5B00),
+                  ),
+                  const SizedBox(width: 5),
+                  Expanded(
+                    child: Text(
+                      'Resultados marcados como TomTom vêm da TomTom Places e '
+                      'são adicionados à comunidade ao selecionar.',
+                      style: TextStyle(
+                        fontSize: 10,
+                        height: 1.3,
+                        color: AppTheme.muted.withValues(alpha: 0.95),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ],
       ],
     );
   }
@@ -1147,6 +1192,27 @@ class _MarketTile extends StatelessWidget {
                               Icons.verified_rounded,
                               size: 15,
                               color: AppTheme.emerald,
+                            ),
+                          ],
+                          if (market.externalId?.isNotEmpty ?? false) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: AppTheme.amberTint,
+                                borderRadius: BorderRadius.circular(5),
+                              ),
+                              child: const Text(
+                                'TomTom',
+                                style: TextStyle(
+                                  fontSize: 8.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: Color(0xFF9A5B00),
+                                ),
+                              ),
                             ),
                           ],
                         ],

@@ -1,12 +1,7 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
 
-import 'package:crypto/crypto.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_sign_in/google_sign_in.dart';
-import 'package:sign_in_with_apple/sign_in_with_apple.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/supabase_service.dart';
@@ -50,7 +45,6 @@ class AuthFailure extends AuthResult {
 enum AuthProvider {
   email,
   google,
-  apple,
 }
 
 /// Serviço centralizado de autenticação
@@ -171,7 +165,7 @@ class AuthService {
 
       _log('[AuthService] Google user: ${googleUser.email}');
 
-      // 3. Obtém o ID Token (necessário para Supabase)
+      // 2. Obtém o ID Token (necessário para Supabase)
       final GoogleSignInAuthentication googleAuth =
           await googleUser.authentication;
       final String? idToken = googleAuth.idToken;
@@ -183,7 +177,7 @@ class AuthService {
 
       _log('[AuthService] Got ID Token (length: ${idToken.length})');
 
-      // 4. Autentica no Supabase com o ID Token
+      // 3. Autentica no Supabase com o ID Token
       _log('[AuthService] Calling Supabase signInWithIdToken (Google)...');
       final response = await SupabaseService.client.auth.signInWithIdToken(
         provider: OAuthProvider.google,
@@ -212,96 +206,6 @@ class AuthService {
       _log('  type: ${e.runtimeType}');
       _log('  stackTrace: $stackTrace');
       return AuthFailure('Erro inesperado no login com Google: $e');
-    }
-  }
-
-  /// Login com Apple (OAuth)
-  Future<AuthResult> signInWithApple() async {
-    try {
-      if (!SupabaseService.isReady) {
-        return const AuthFailure(
-            'Modo offline. Conecte-se à internet para autenticar.');
-      }
-
-      _log('[AuthService] Starting Apple Sign-In flow...');
-
-      // 1. Gera nonce para segurança
-      final rawNonce = _generateNonce();
-      final nonce = _sha256(rawNonce);
-
-      _log('[AuthService] Generated nonce (raw): $rawNonce');
-      _log('[AuthService] Generated nonce (sha256): $nonce');
-
-      // 2. Inicia o fluxo do Apple Sign-In
-      _log('[AuthService] Requesting Apple ID credential...');
-
-      // Configuração específica para Android (requer webAuthenticationOptions)
-      final credential = await SignInWithApple.getAppleIDCredential(
-        scopes: [
-          AppleIDAuthorizationScopes.email,
-          AppleIDAuthorizationScopes.fullName,
-        ],
-        nonce: nonce,
-        webAuthenticationOptions: kIsWeb || Platform.isAndroid
-            ? WebAuthenticationOptions(
-                clientId: const String.fromEnvironment('APPLE_CLIENT_ID'),
-                redirectUri: Uri.parse(
-                    const String.fromEnvironment('APPLE_REDIRECT_URI'),
-                ),
-              )
-            : null,
-      );
-
-      _log('[AuthService] Received Apple credential:');
-      _log('[AuthService]   userIdentifier: ${credential.userIdentifier}');
-      _log('[AuthService]   email: ${credential.email}');
-      _log('[AuthService]   givenName: ${credential.givenName}');
-      _log('[AuthService]   familyName: ${credential.familyName}');
-      _log('[AuthService]   identityToken: ${credential.identityToken != null ? 'PRESENT (${credential.identityToken!.length} chars)' : 'NULL'}');
-      _log('[AuthService]   authorizationCode: ${credential.authorizationCode != null ? 'PRESENT' : 'NULL'}');
-
-      final identityToken = credential.identityToken;
-      if (identityToken == null) {
-        _log('[AuthService] ERROR: identityToken is null!');
-        return const AuthFailure('Não foi possível obter o token da Apple. Tente novamente.');
-      }
-
-      // 3. Autentica no Supabase com o Identity Token + nonce
-      _log('[AuthService] Calling Supabase signInWithIdToken (Apple)...');
-      final response = await SupabaseService.client.auth.signInWithIdToken(
-        provider: OAuthProvider.apple,
-        idToken: identityToken,
-        nonce: rawNonce,
-      );
-
-      _log('[AuthService] Supabase response:');
-      _log('[AuthService]   user: ${response.user?.id ?? 'NULL'}');
-      _log('[AuthService]   session: ${response.session != null ? 'PRESENT' : 'NULL'}');
-
-      if (response.user != null) {
-        _log('[AuthService] Apple login successful for user: ${response.user!.id}');
-        return AuthSuccess(response.user!);
-      }
-      _log('[AuthService] ERROR: Supabase returned null user');
-      return const AuthFailure('Falha ao autenticar com Apple no Supabase. Tente novamente.');
-    } on AuthException catch (e, stackTrace) {
-      _log('[AuthService] signInWithApple AuthException:');
-      _log('  message: ${e.message}');
-      _log('  code: ${e.code}');
-      _log('  stackTrace: $stackTrace');
-      return AuthFailure(_translateAuthError(e.message), code: e.code);
-    } on SignInWithAppleAuthorizationException catch (e, stackTrace) {
-      _log('[AuthService] signInWithApple SignInWithAppleAuthorizationException:');
-      _log('  code: ${e.code}');
-      _log('  message: ${e.message}');
-      _log('  stackTrace: $stackTrace');
-      return AuthFailure('Erro na autorização da Apple: ${e.message}', code: e.code.toString());
-    } catch (e, stackTrace) {
-      _log('[AuthService] signInWithApple unexpected error:');
-      _log('  error: $e');
-      _log('  type: ${e.runtimeType}');
-      _log('  stackTrace: $stackTrace');
-      return AuthFailure('Erro inesperado no login com Apple: $e');
     }
   }
 
@@ -418,19 +322,6 @@ class AuthService {
       return 'Sessão inválida ou expirada. Faça login novamente.';
     }
     return 'Não foi possível completar a operação. Tente novamente.';
-  }
-
-  String _generateNonce() {
-    const chars =
-        '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
-    final random = DateTime.now().millisecondsSinceEpoch.toString();
-    return random + (chars * 2).substring(0, 32 - random.length);
-  }
-
-  String _sha256(String input) {
-    var bytes = utf8.encode(input);
-    var digest = sha256.convert(bytes);
-    return digest.toString();
   }
 }
 

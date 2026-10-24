@@ -1,9 +1,11 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/models/mercado.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/supabase_service.dart';
+import '../../../core/services/tomtom_service.dart';
 
 class MarketServiceException implements Exception {
   final String message;
@@ -57,17 +59,20 @@ class MarketService {
     NearbyMarketsFetcher? nearbyFetcher,
     MarketNameSearcher? nameSearcher,
     MarketCreator? creator,
+    TomTomService? tomTomService,
   })  : _locationService = locationService ?? LocationService(),
         _locationResolver = locationResolver,
         _nearbyFetcher = nearbyFetcher,
         _nameSearcher = nameSearcher,
-        _creator = creator;
+        _creator = creator,
+        _tomTomService = tomTomService;
 
   final LocationService _locationService;
   final MarketLocationResolver? _locationResolver;
   final NearbyMarketsFetcher? _nearbyFetcher;
   final MarketNameSearcher? _nameSearcher;
   final MarketCreator? _creator;
+  final TomTomService? _tomTomService;
 
   Future<LocationAccessResult> resolveLocation({bool forceRefresh = true}) {
     final resolver = _locationResolver;
@@ -77,27 +82,95 @@ class MarketService {
     );
   }
 
+  /// Busca híbrida de mercados próximos:
+  ///
+  /// 1. base interna (PostGIS / RPC `buscar_mercados_proximos`);
+  /// 2. fallback TomTom Places API quando a base interna não retorna nada;
+  /// 3. deduplicação por nome e por `external_id`.
+  ///
+  /// Passe [includeExternal] `false` para consultar apenas a base interna
+  /// (usado no match exato de 100 m).
   Future<List<Mercado>> findNearby({
     required double latitude,
     required double longitude,
     double radiusMeters = 5000,
     int limit = 20,
+    bool includeExternal = true,
   }) async {
     final fetcher = _nearbyFetcher;
-    if (fetcher != null) {
-      return fetcher(
-        latitude: latitude,
-        longitude: longitude,
-        radiusMeters: radiusMeters,
-        limit: limit,
+
+    final results = <Mercado>[];
+    final chaves = <String>{};
+    MarketServiceException? localError;
+
+    try {
+      final local = fetcher != null
+          ? await fetcher(
+              latitude: latitude,
+              longitude: longitude,
+              radiusMeters: radiusMeters,
+              limit: limit,
+            )
+          : await _fetchNearbyFromSupabase(
+              latitude: latitude,
+              longitude: longitude,
+              radiusMeters: radiusMeters,
+              limit: limit,
+            );
+      for (final mercado in local) {
+        final externo = mercado.externalId;
+        if (externo != null && externo.isNotEmpty && !chaves.add('e:$externo')) {
+          continue;
+        }
+        if (!chaves.add('n:${_normalizeName(mercado.nome)}')) continue;
+        results.add(mercado);
+      }
+    } on MarketServiceException catch (error) {
+      localError = error;
+    } catch (error) {
+      localError = const MarketServiceException(
+        'Não foi possível carregar os mercados próximos agora.',
       );
+      debugPrint('[MarketService] falha na base interna: $error');
     }
-    return _fetchNearbyFromSupabase(
-      latitude: latitude,
-      longitude: longitude,
-      radiusMeters: radiusMeters,
-      limit: limit,
-    );
+
+    final tomTom = _tomTomService;
+    // A TomTom só entra quando a base interna não tem nada no raio — evita
+    // gastar cota da API e mantém a busca rápida quando a comunidade já cobre
+    // a região.
+    if (includeExternal &&
+        results.isEmpty &&
+        tomTom != null &&
+        tomTom.isConfigured) {
+      try {
+        final places = await tomTom.searchNearby(
+          latitude: latitude,
+          longitude: longitude,
+          radiusMeters: radiusMeters,
+          limit: limit,
+        );
+        for (final place in places) {
+          // IDs da TomTom são únicos; lojas diferentes com o mesmo nome
+          // (ex.: filiais "Carrefour") devem continuar aparecendo.
+          if (!chaves.add('e:${place.id}')) continue;
+          results.add(place.toMercado());
+        }
+      } catch (error) {
+        // A TomTom é opcional: falha silenciosa, a base interna continua.
+        debugPrint('[MarketService] TomTom indisponível: $error');
+      }
+    }
+
+    if (results.isEmpty && localError != null) {      throw localError;
+    }
+
+    results.sort((a, b) {
+      final da = a.distanciaMetros ?? double.infinity;
+      final db = b.distanciaMetros ?? double.infinity;
+      return da.compareTo(db);
+    });
+
+    return results.take(limit).toList(growable: false);
   }
 
   Future<List<Mercado>> searchByName(
@@ -109,18 +182,104 @@ class MarketService {
     if (trimmed.isEmpty) return const [];
 
     final searcher = _nameSearcher;
-    if (searcher != null) {
-      return searcher(
-        trimmed,
-        latitude: latitude,
-        longitude: longitude,
-      );
+
+    final results = <Mercado>[];
+    final chaves = <String>{};
+    Object? localError;
+
+    try {
+      final local = searcher != null
+          ? await searcher(
+              trimmed,
+              latitude: latitude,
+              longitude: longitude,
+            )
+          : await _searchFromSupabase(
+              trimmed,
+              latitude: latitude,
+              longitude: longitude,
+            );
+      for (final mercado in local) {
+        if (!chaves.add('n:${_normalizeName(mercado.nome)}')) continue;
+        results.add(mercado);
+      }
+    } catch (error) {
+      localError = error;
     }
-    return _searchFromSupabase(
-      trimmed,
-      latitude: latitude,
-      longitude: longitude,
-    );
+
+    final tomTom = _tomTomService;
+    if (tomTom != null && tomTom.isConfigured) {
+      try {
+        final places = await tomTom.searchByName(
+          trimmed,
+          latitude: latitude,
+          longitude: longitude,
+        );
+        for (final place in places) {
+          if (!chaves.add('e:${place.id}')) continue;
+          if (!chaves.add('n:${_normalizeName(place.nome)}')) continue;
+          results.add(place.toMercado());
+        }
+      } catch (error) {
+        debugPrint('[MarketService] busca TomTom indisponível: $error');
+      }
+    }
+
+    if (results.isEmpty && localError is MarketServiceException) {
+      throw localError;
+    }
+
+    return results;
+  }
+
+  /// Sincronização invisível de um mercado vindo da TomTom.
+  ///
+  /// Faz upsert por `external_id` (nunca duplica) e devolve o mercado já
+  /// persistido (com `id` real do Supabase). Se a nuvem falhar, devolve o
+  /// próprio mercado local para a compra continuar funcionando offline.
+  Future<MarketCreationResult> persistExternalMarket(Mercado market) async {
+    final externalId = market.externalId;
+    if (externalId == null || externalId.isEmpty) {
+      return MarketCreationResult(market);
+    }
+
+    if (!SupabaseService.isReady) {
+      return MarketCreationResult(market);
+    }
+
+    try {
+      final response = await SupabaseService.client.rpc(
+        'upsert_mercado_by_external_id',
+        params: {
+          'p_external_id': externalId,
+          'p_nome': market.nome,
+          'p_lat': market.latitude,
+          'p_lng': market.longitude,
+          'p_cidade': market.cidade,
+          'p_bairro': market.bairro,
+          'p_endereco': market.endereco,
+        },
+      );
+      final rows = _mapRows(response);
+      if (rows.isEmpty) {
+        return MarketCreationResult(market);
+      }
+      return MarketCreationResult(rows.first.copyWith(externalId: externalId));
+    } catch (error) {
+      debugPrint('[MarketService] upsert do mercado externo falhou: $error');
+      return MarketCreationResult(market, error: error);
+    }
+  }
+
+  /// Chave de comparação tolerante a acentos, caixa e pontuação.
+  static String _normalizeName(String value) {
+    const comAcento = 'áàâãäéèêëíìîïóòôõöúùûüçñ';
+    const semAcento = 'aaaaaeeeeiiiiooooouuuucn';
+    var texto = value.toLowerCase().trim();
+    for (var i = 0; i < comAcento.length; i++) {
+      texto = texto.replaceAll(comAcento[i], semAcento[i]);
+    }
+    return texto.replaceAll(RegExp(r'[^a-z0-9]'), '');
   }
 
   Future<MarketCreationResult> createMarket({
@@ -292,5 +451,14 @@ class MarketService {
 final marketServiceProvider = Provider<MarketService>((ref) {
   return MarketService(
     locationService: ref.watch(locationServiceProvider),
+    tomTomService: ref.watch(tomTomServiceProvider),
   );
+});
+
+final tomTomServiceProvider = Provider<TomTomService>((ref) {
+  final service = TomTomService(
+    apiKey: const String.fromEnvironment('TOMTOM_API_KEY'),
+  );
+  ref.onDispose(service.dispose);
+  return service;
 });

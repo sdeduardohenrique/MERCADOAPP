@@ -2,7 +2,7 @@
 
 **Last Updated:** October 28, 2026
 
-**Status:** ✅ APK release ARM64 (42,7 MB) validado no Redmi Note 11 com **os 4 pilares de localização/visitante entregues**: provider global de localização de alta precisão (fonte única), raio dinâmico 1/3/5/10 km na busca TomTom, modo visitante 100% local e bloqueio da Comunidade com CTA de cadastro. Fluxo híbrido PostGIS + TomTom, autenticação com isolamento por usuário e **110 testes automatizados passando**.
+**Status:** ✅ APK release ARM64 (43,2 MB) validado no Redmi Note 11 com **Minhas Listas 2.0** (aba própria, múltiplas listas, itens agrupados por setor, quantidade/unidade/preço estimado, checklist ativo durante a compra e mini-barra expansível), **os 4 pilares de localização/visitante entregues**, **edição de perfil operacional** (nome + avatar no Supabase), **hub de ferramentas da Nova Compra** (Calculadora de Promoções e Comparador de Custo) e **recibo compartilhável via WhatsApp**: provider global de localização de alta precisão (fonte única), raio dinâmico 1/3/5/10 km na busca TomTom, modo visitante 100% local, bloqueio da Comunidade com CTA de cadastro, BottomSheet de perfil com atualização instantânea no card e no Dashboard e FAB “+” que abre entrada manual, voz e as duas calculadoras de economia. Fluxo híbrido PostGIS + TomTom, autenticação com isolamento por usuário, sincronização Supabase das listas (`listas_compras`/`itens_lista`) e **153 testes automatizados passando**.
 
 ---
 
@@ -35,6 +35,7 @@
 | Localização | `geolocator` + `permission_handler` | 11.1.0 / 11.x |
 | Offline (planejado) | Drift/SQLite | 2.x |
 | Animações | `flutter_animate` | 4.x |
+| Compartilhamento | `share_plus` | 13.3.1 |
 
 > ⚠️ O pacote guarda-chuva `google_ml_kit` foi **removido**. Ele arrastava 11 módulos
 > não usados (tradução, face, pose, digital ink, etc.), inflando o APK de 37 MB para 186 MB
@@ -104,12 +105,15 @@ lib/
 │   │       └── widgets/ (camera_preview, partial_scan_sheet)
 │   ├── cart/
 │   │   ├── domain/checkout_service.dart
+│   │   ├── domain/purchase_tools.dart          # matemática de promoções e custo/kg-L
 │   │   └── presentation/
-│   │       ├── active_purchase_screen.dart      # carrinho + orçamento + finalização
+│   │       ├── active_purchase_screen.dart      # carrinho + orçamento + finalização + FAB de ferramentas
 │   │       ├── providers/cart_provider.dart
 │   │       ├── providers/purchase_budget_provider.dart
 │   │       └── widgets/ (cart_item_editor_sheet, purchase_budget_sheet,
-│   │                      manual_item_sheet)
+│   │                      manual_item_sheet, purchase_tools_sheet,
+│   │                      promotion_calculator_modal,
+│   │                      unit_cost_comparator_modal)
 │   └── community_alerts/
 │       ├── presentation/providers/alert_preferences_provider.dart
 │       └── presentation/widgets/price_alert_banner.dart
@@ -125,13 +129,16 @@ Projeto: `vvoqamnucengagpwwozt` — `https://vvoqamnucengagpwwozt.supabase.co`
 
 | Tabela | Função | Destaques |
 |--------|--------|-----------|
-| `profiles` | Perfis de usuário | trust_score, total_scans |
+| `profiles` | Perfis de usuário | `display_name`, `avatar_url`, `updated_at`; trigger `handle_new_user` cria a linha no cadastro e backfill cobre contas antigas (migration `008`) |
 | `mercados` | Mercados/lojas | `geog geography(Point,4326)`, `latitude`, `longitude`, `cidade`, `bairro`; originada do rename de `stores` na migration `004` |
 | `products` | Catálogo | EAN único, busca full-text pt-BR |
 | `community_prices` | Preços colaborativos | TTL 72h, unit_price, confirmações/disputas, `imagem_url`, `old_price`, `contributor_name`, `user_id` nullable para publicação anónima; `store_id` aponta para `mercados` |
 | `price_confirmations` | Validações | triggers de contagem |
 | `purchases` | Resumo das compras finalizadas | total, economia, data, `mercado_id`, RLS por usuário |
 | `purchase_items` | Itens da compra | preço unitário, quantidade, total gerado |
+| `listas_compras` | Listas de compras | `name`, `icon`, `created_at`, `updated_at`; RLS `auth.uid() = user_id`; trigger de `updated_at`; migration `010` |
+| `itens_lista` | Itens das listas | `list_id` (FK cascade), `name`, `quantity`, `unit`, `estimated_price`, `sector`, `is_bought`; RLS via lista do usuário; índices por lista/setor; migration `010` |
+| `pre_shopping_list_items` | Legado da lista plana | Mantida apenas para migração; os itens antigos foram copiados para a lista “Minha Lista” pela migration `010` e o app não a utiliza mais |
 
 View: `monthly_spending` — total por usuário/mês, com `security_invoker` para respeitar a RLS de `purchases`.
 
@@ -152,6 +159,7 @@ View: `monthly_spending` — total por usuário/mês, com `security_invoker` par
 
 - Bucket público `ofertas_storage`, limite de 5 MB e MIME types JPEG/PNG/WebP.
 - Upload anónimo permitido pela policy do bucket; a URL pública é associada ao preço em `community_prices.imagem_url`.
+- Bucket público `avatars` (migration `008`), limite de 5 MB e JPEG/PNG/WebP; upload/update/delete restritos ao próprio usuário via pasta `{user_id}/...`, leitura pública.
 
 ### Observações de schema
 
@@ -235,18 +243,36 @@ Atualizar com `npx skills add flutter/skills --skill '*' --agent universal`.
 
 | Artefato | Caminho | Tamanho |
 |----------|---------|---------|
-| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **42,7 MB** |
-| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 35,5 MB |
-| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 46,2 MB |
-| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 42,7 MB |
-| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 42,7 MB |
+| **Release ARM64** (usar este) | `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` | **43,2 MB** |
+| Release ARMv7 | `build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk` | 36,1 MB |
+| Release x86_64 (emulador) | `build/app/outputs/flutter-apk/app-x86_64-release.apk` | 46,8 MB |
+| Cópia na raiz do projeto | `somaai-arm64-release.apk` | 43,2 MB |
+| Cópia no celular | `/sdcard/Download/somaai-arm64-release.apk` | 43,2 MB |
 | Debug ARM64 | `build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk` | 186 MB |
 | Debug universal | `build/app/outputs/flutter-apk/app-debug.apk` | 372 MB |
 
 Assinatura: chave **debug** (suficiente para testes; trocar antes de publicar).
-Label exibido no Android: **SomaAí** (`applicationId` ainda é `com.example.mercado_app`).
-Versão instalada: `1.0.0` (`versionCode 4004`).
-SHA-256 do ARM64: `96426c08a1ff68d6a7ba90ae79c4fc4cf30de66c0f95502bf9a2a30e3d34b16f`.
+Label exibido no Android: **SomaAí** (`applicationId` é `com.somaaiapp`).
+Versão: `1.0.0+2005` (o split ARM64 é instalado como `versionCode 4005`; usar `adb install -r -d` se o aparelho tiver um build anterior).
+SHA-256 do ARM64: `73d97ec2840d47f78e72951183f1d7b57a3906fec46ac8c84637a1f20f0d9d85`.
+
+### Validação do módulo Minhas Listas 2.0 (28/10/2026)
+
+✅ Instalado e validado no Redmi Note 11: **4 abas** (Início, Minhas Listas,
+Comunidade e Perfil), atalho “Minhas Listas” no Dashboard, criação da lista
+“Feira da Semana”, item “Tomate” (2 un, R$ 8,50) agrupado em **Hortifrúti**,
+item “Cafe” (1 un, R$ 9,90, preço digitado com ponto) agrupado em **Mercearia
+& Mantimentos**, estimativa total de **R$ 26,90**, checkbox com riscado animado,
+botão **“Iniciar Compra no Mercado”** agora abrindo primeiro a seleção de
+mercado/GPS e depois a folha de orçamento (o fluxo da Home), mini-barra expansível
+**“Lista: Minha Lista • 2/2 itens no carrinho • tudo comprado 🎉”**,
+auto-riscar de “Arroz” ao adicioná-lo ao carrinho e limpeza da lista ativa ao
+limpar o carrinho. Sincronização confirmada no Supabase durante o teste:
+**2 listas e 4 itens** em `listas_compras`/`itens_lista` (2 comprados em
+“Minha Lista” e 2 pendentes em “Feira da Semana”); a lista de teste foi
+excluída ao final, restando “Minha Lista” com os 2 itens migrados, ambos
+desmarcados para um novo teste. A migration `010` está aplicada; a tabela antiga
+`pre_shopping_list_items` foi mantida apenas como legado.
 
 ### Instalação no Redmi Note 11 (`6D4TQKXGONGAU8FE`)
 
@@ -424,8 +450,11 @@ Fluxo executado no Redmi Note 11 (`1080×2400`, Android 13), com dados de demons
   miniatura da etiqueta (com e sem foto), zonas do card de orçamento e foto da etiqueta
   em tela cheia.
 - `test/purchase_budget_sheet_test.dart`: definir, continuar sem e remover orçamento.
-- Suíte completa: **93 testes** passando; `dart analyze lib test integration_test`
-  sem issues.
+- `test/shopping_lists_test.dart`: 16 casos de setores/unidades, matcher, CRUD,
+  persistência, migração do visitante, auto-riscar, tela de listas, detalhe e
+  onboarding de mercado/orçamento ao iniciar a compra pela lista.
+- Suíte completa: **153 testes** passando; `dart analyze lib test` sem erros/warnings
+  (apenas infos pré-existentes).
 
 **Validação no Redmi Note 11**
 
@@ -470,14 +499,14 @@ mexer no throttle.
 - [x] **ProGuard/R8 ampliado**: Flutter, MethodChannel handlers, ML Kit, GMS, Supabase, JNI e anotações
 - [x] **Launch theme verde** (`@color/launch_background`) — elimina o flash preto do modo escuro
 - [x] **Câmera resiliente**: timeout de 15s, botão “Tentar novamente”, `dispose` seguro
-- [x] Testes: **93 testes** passando (splash, fallback do `BootstrapGate`, Dashboard,
+- [x] Testes: **153 testes** passando (splash, fallback do `BootstrapGate`, Dashboard,
       filtros de período, troca de aba, modelo `Purchase`, formatadores, parser de
       preços, gate de confirmação em 2 frames, folha do scanner, fluxo do carrinho,
       compra sem mercado, edição do histórico, checkout, identificação de mercado,
       ofertas da Comunidade e contribuição comunitária)
 - [x] Script `tools/diagnose_somaai.sh` para captura de logs no aparelho
 - [x] **Dashboard financeiro** como tela inicial (não abre mais a câmera direto)
-- [x] **3 abas** (`Início`, `Comunidade`, `Perfil`) com `IndexedStack` (estado preservado, construção lazy)
+- [x] **4 abas** (`Início`, `Minhas Listas`, `Comunidade`, `Perfil`) com `IndexedStack` (estado preservado, construção lazy) e `shellTabProvider` para o atalho da Home abrir a aba de listas
 - [x] **Histórico persistente** em `SharedPreferences` (`Purchase`/`PurchaseItem`)
 - [x] **Finalizar compra** no carrinho: modal com total/mercado, salva no histórico,
       limpa o Riverpod e volta ao Dashboard com SnackBar
@@ -501,6 +530,12 @@ mexer no throttle.
       (eliminado o erro repetido “a camera has started streaming images”)
 - [x] Diálogo de finalização sem autofocus no campo do mercado (sem teclado/handle por cima)
       e contagem no singular (“1 item”)
+- [x] **Minhas Listas 2.0 (28/10/2026)**: aba própria, múltiplas listas com ícone
+      personalizável, itens agrupados por setor, quantidade/unidade/preço estimado,
+      checkbox com riscado animado, “Iniciar Compra no Mercado”, mini-barra expansível
+      e auto-riscar no carrinho; Supabase `listas_compras`/`itens_lista` (migration `010`)
+      e cache local para visitante
+- [x] **Recibo compartilhável** via `share_plus` na tela de sucesso e no detalhe da compra
 
 ### 🚀 Tela de Abertura (Splash Screen) + Auth Checker (out/2026)
 
@@ -609,11 +644,12 @@ Os logs do app aparecem com o prefixo `[SomaAí]` (ex.: `Supabase indisponível 
 
 ### Nova navegação
 
-`main.dart` → `BootstrapGate` → `AppShell` (3 abas construídas na primeira visita):
+`main.dart` → `BootstrapGate` → `AppShell` (4 abas construídas na primeira visita):
 
 | Aba | Ficheiro | Conteúdo |
 |-----|----------|----------|
-| Início | `home_dashboard_screen.dart` | Saudação, CTA “Iniciar nova compra”, filtros de período, Bento de gastos/economia, últimas compras |
+| Início | `home_dashboard_screen.dart` | Saudação, CTA “Iniciar nova compra”, filtros de período, Bento de gastos/economia, atalho “Minhas Listas” e últimas compras |
+| Minhas Listas | `shopping_list/presentation/shopping_lists_screen.dart` | Múltiplas listas por ocasião, progresso, estimativa e detalhe por setor |
 | Comunidade | `community_screen.dart` | Radar real com cidade/raio, ofertas, foto, detalhes e rotas |
 | Perfil | `profile_screen.dart` | Estatísticas, mercados favoritos, preferências e limpar histórico |
 
@@ -737,6 +773,19 @@ A câmera abre apenas por `Navigator.push` a partir do CTA.
 | `NoSuchMethodError` no `shared_preferences` (release) | R8 renomeava `kotlin.coroutines.Continuation` na assinatura JNI; `includedescriptorclasses` + keeps de `kotlin.*` e `android.enableR8.fullMode=false` |
 | `ClassNotFoundException: kotlin/Result` (release) | `-keep class kotlin.Result { *; }` + `kotlinx.coroutines.**`; validação no aparelho sem exceções |
 | `INSTALL_FAILED_VERSION_DOWNGRADE` | `version` do pubspec passou para `1.0.0+2004` (aparelho tinha versão anterior) |
+| Preço digitado com ponto (`8.50`) virava `850` | `_parseNumber` aceita `8,50`, `8.50` e `1.234,56`; o total estimado usa o valor correto |
+
+---
+
+### Minhas Listas 2.0 (28/10/2026)
+
+- **Navegação:** `AppShell` com 4 abas (`Início`, `Minhas Listas`, `Comunidade`, `Perfil`); o atalho compacto “Minhas Listas” do Dashboard troca a aba via `shellTabProvider` em vez de abrir uma rota separada.
+- **Múltiplas listas:** `ShoppingListsScreen` com cards por ocasião, ícone (emoji) personalizável, barra de progresso, contador “X de Y itens” e estimativa total. Criação/edição/exclusão em BottomSheets; lista vazia com sugestões rápidas.
+- **Detalhe por setor:** `ShoppingListDetailScreen` agrupa em Hortifrúti, Açougue & Peixaria, Laticínios & Frios, Limpeza & Lavanderia, Mercearia & Mantimentos, Padaria & Matinais e Outros. Cada item tem nome, quantidade + unidade (`un`, `kg`, `g`, `L`, `ml`, `cx`, `pacote`, `dz`), preço estimado opcional e checkbox com riscado animado; comprados vão para a seção “Comprados”.
+- **Compra ativa:** o botão verde **“Iniciar Compra no Mercado”** abre o mesmo onboarding da Home via `prepareNewPurchase`: primeiro pergunta **onde está comprando** (mercado/GPS) e depois o **orçamento da compra**; se o usuário fechar a seleção de mercado, a compra não inicia. Em seguida define a lista ativa. `ActiveShoppingListBar` no topo da `ActivePurchaseScreen` mostra “Lista: … (X/Y itens no carrinho)” com progresso e expansão para os pendentes. `CartNotifier.addItem` chama `markBoughtMatching` para marcar automaticamente o item correspondente/muito parecido; limpar o carrinho ou finalizar a compra limpa a lista ativa.
+- **Persistência offline-first:** visitante em `SharedPreferences` (`somaai.shopping_lists.v2.guest`), com migração única da lista plana antiga; autenticado em cache local + `listas_compras`/`itens_lista` (migration `010_shopping_lists.sql`, RLS por `user_id`, triggers e índices), com reconciliação em segundo plano e filas serializadas para não sobrescrever mutações recentes.
+- **Matcher:** `shopping_list_matcher.dart` normaliza acentos/caixa/plural, ignora medidas (kg/L) e escolhe o melhor item pendente por score. “Leite Integral Parmalat” risca “Leite” sem riscar “Leite Condensado”.
+- **Testes:** 16 casos em `test/shopping_lists_test.dart` (setores/unidades, matcher, CRUD, persistência, migração do visitante, auto-riscar, tela de listas e detalhe) e a suíte total em **153 testes**. A tela de sucesso e o detalhe da compra mantêm o recibo compartilhável via `share_plus`.
 
 ---
 
@@ -747,18 +796,21 @@ A câmera abre apenas por `Navigator.push` a partir do CTA.
    - **Pilar 2 (Raio Dinâmico na TomTom)**: chips 1/3/5/10 km (padrão 5 km) no BottomSheet, filtro circular `center: [lng, lat]` + `radiusInMeters` no `TomTomService.searchByName`, busca reexecutada ao trocar o raio.
    - **Pilar 3 (Modo Visitante 100% Local)**: dialog "Como você quer ser chamado?", apelido em `SharedPreferences`, `MarketService` com `allowRemote: false` (nenhuma leitura/escrita Supabase), alertas da comunidade desativados e compras apenas locais.
    - **Pilar 4 (Bloqueio da Comunidade)**: empty state com cadeado + texto de conta gratuita + CTA verde "Criar minha conta", que limpa a sessão de visitante e volta ao Login/Cadastro.
-2. Trocar `applicationId` (`com.example.mercado_app` / `com.somaaiapp`) e gerar keystore própria para publicação na Play Store.
+   - **Edição de perfil (nome + avatar)**: lápis e card do Perfil abrem BottomSheet; nome salvo em `profiles` e nos metadados (`full_name`), avatar no bucket público `avatars` com upload isolado por `{user_id}/`; `ProfileController.updateProfile()` invalida `userProfileProvider` e atualiza card/Dashboard na hora; e-mail somente leitura; loading no botão e SnackBars de sucesso/erro.
+   - **Hub de ferramentas da Nova Compra**: barra inferior enxuta (apenas “Ler Etiquetas (Câmera)” e “Finalizar Compra”) e FAB verde “+” com BottomSheet “Ferramentas de Compra” (Manual, Voz, Calculadora de Promoções e Comparador de Custo). `PromotionCalculatorModal` cobre Atacado (quantidade mínima + preço promocional) e Leve X/Pague Y (preço rateado); `UnitCostComparatorModal` converte g/kg e ml/L, destaca a embalagem “Mais Econômico!” e adiciona o vencedor ao `cartProvider`. 13 novos testes em `test/purchase_tools_test.dart`.
+   - **Minhas Listas 2.0**: aba própria, múltiplas listas por ocasião, itens agrupados por setor, quantidade/unidade/preço estimado, checklist ativo com mini-barra expansível e auto-riscar no carrinho; persistência local para visitante e `listas_compras`/`itens_lista` no Supabase (migration `010`). 16 novos testes; suíte total em **153**.
+2. Gerar keystore própria e configurar a assinatura release (o `applicationId` já é `com.somaaiapp`) para publicação na Play Store.
 3. Aplicar consolidação final de RLS policies (`tools/rls_isolation.sql`).
-4. Implementar entrada por voz (`speech_to_text`) e o checkout fiscal.
+4. Implementar a entrada por voz real (`speech_to_text`) no item do hub e o checkout fiscal.
 5. Restringir a chave TomTom (Edge Function/painel) antes de produção e adicionar a atribuição oficial "Powered by TomTom".
 
 ---
 
 ## 📊 Métricas
 
-- Build release ARM64: ~30–60 s (`tools/build_apk.sh`, split-per-abi)
-- APK release ARM64: **42,7 MB** (`somaai-arm64-release.apk`)
-- Testes: **110 passando** (`flutter test`)
+- Build release ARM64: ~60–120 s (`tools/build_apk.sh`, split-per-abi)
+- APK release ARM64: **43,2 MB** (`somaai-arm64-release.apk`, versão `1.0.0+2005`)
+- Testes: **153 passando** (`flutter test`)
 - Análise estática: 0 erros / 0 warnings (`dart analyze lib test`)
 - Cota TomTom: consumo sob demanda no fallback (PostGIS vazio) e na busca manual, sempre com filtro circular pelo raio escolhido
 

@@ -243,7 +243,10 @@ void main() {
       await tester.pumpWidget(_screen(container));
       await tester.pump();
 
-      await tester.tap(find.byTooltip('Ver foto da etiqueta'));
+      final photoButton = find.byTooltip('Ver foto da etiqueta');
+      await tester.ensureVisible(photoButton);
+      await tester.pumpAndSettle();
+      await tester.tap(photoButton);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
 

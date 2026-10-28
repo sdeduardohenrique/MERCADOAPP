@@ -22,12 +22,18 @@ import '../../community_alerts/presentation/providers/alert_preferences_provider
 import '../../community_alerts/presentation/widgets/price_alert_banner.dart';
 import '../../home/presentation/providers/purchase_history_provider.dart';
 import '../../scanner/presentation/scanner_screen.dart';
+import '../../shopping_list/presentation/providers/shopping_lists_provider.dart';
+import '../../shopping_list/presentation/widgets/active_shopping_list_bar.dart';
 import '../domain/checkout_service.dart';
 import 'providers/cart_provider.dart';
 import 'providers/purchase_budget_provider.dart';
+import 'purchase_success_screen.dart';
 import 'widgets/cart_item_editor_sheet.dart';
 import 'widgets/manual_item_sheet.dart';
+import 'widgets/promotion_calculator_modal.dart';
 import 'widgets/purchase_budget_sheet.dart';
+import 'widgets/purchase_tools_sheet.dart';
+import 'widgets/unit_cost_comparator_modal.dart';
 
 /// Carrinho central da "Nova compra".
 ///
@@ -125,6 +131,39 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
     if (item != null && mounted) {
       _showSnack('Item adicionado ao carrinho.');
     }
+  }
+
+  /// Hub "+": centraliza entrada manual, voz e as calculadoras.
+  Future<void> _openTools() async {
+    final tool = await showPurchaseToolsSheet(context);
+    if (!mounted || tool == null) return;
+
+    switch (tool) {
+      case PurchaseTool.manual:
+        await _addManualItem();
+        break;
+      case PurchaseTool.voice:
+        _openVoiceInput();
+        break;
+      case PurchaseTool.promotion:
+        await _openPromotionCalculator();
+        break;
+      case PurchaseTool.unitCost:
+        await _openUnitCostComparator();
+        break;
+    }
+  }
+
+  Future<void> _openPromotionCalculator() async {
+    final item = await showPromotionCalculatorModal(context);
+    if (!mounted || item == null) return;
+    _showSnack('${item.name} adicionado ao carrinho.');
+  }
+
+  Future<void> _openUnitCostComparator() async {
+    final item = await showUnitCostComparatorModal(context);
+    if (!mounted || item == null) return;
+    _showSnack('${item.name} adicionado ao carrinho.');
   }
 
   Future<void> _editItem(CartItem item) async {
@@ -295,6 +334,7 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
     ref.read(cartProvider.notifier).clear();
     ref.read(selectedMarketProvider.notifier).clear();
     ref.read(purchaseBudgetProvider.notifier).clear();
+    ref.read(activeShoppingListIdProvider.notifier).clear();
     setState(() {
       _currentAlert = null;
       _sessionSavings = 0;
@@ -371,12 +411,20 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
         _isFinalizing = true;
       });
 
+      // Economia das calculadoras de promoção (Atacado / Leve X Pague Y),
+      // somada à economia já detectada pelos alertas da comunidade.
+      final promotionSavings = cart.fold<double>(
+        0,
+        (sum, item) =>
+            sum + ((item.rawOcrData?['savings'] as num?)?.toDouble() ?? 0),
+      );
+
       final purchase = Purchase(
         id: const Uuid().v4(),
         storeName: market?.nome ?? 'Compra sem mercado',
         marketId: market != null && market.isRemoto ? market.id : null,
         date: DateTime.now(),
-        savings: _sessionSavings,
+        savings: _sessionSavings + promotionSavings,
         items: cart
             .map(
               (item) => PurchaseItem(
@@ -390,6 +438,7 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
             .toList(),
       );
 
+      final navigator = Navigator.of(context);
       final messenger = ScaffoldMessenger.of(context);
 
       // 1. Fonte de verdade local: o histórico e o total do mês são derivados
@@ -416,14 +465,22 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
       ref.read(cartProvider.notifier).clear();
       ref.read(selectedMarketProvider.notifier).clear();
       ref.read(purchaseBudgetProvider.notifier).clear();
+      ref.read(activeShoppingListIdProvider.notifier).clear();
 
       if (!mounted) return;
-      Navigator.of(context).popUntil((route) => route.isFirst);
+      navigator.popUntil((route) => route.isFirst);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(content: Text('Compra finalizada com sucesso!')),
         );
+      unawaited(
+        navigator.push(
+          MaterialPageRoute(
+            builder: (_) => PurchaseSuccessScreen(purchase: purchase),
+          ),
+        ),
+      );
     } catch (error, stack) {
       debugPrint('[SomaAí] Falha ao finalizar compra: $error');
       debugPrintStack(stackTrace: stack);
@@ -559,6 +616,7 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
     final itemCount = ref.watch(cartItemCountProvider);
     final market = ref.watch(selectedMarketProvider);
     final budget = ref.watch(purchaseBudgetProvider);
+    final activeList = ref.watch(activeShoppingListProvider);
     final busy = _isFinalizing || _finishRequested;
 
     return Scaffold(
@@ -579,8 +637,12 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 24),
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 96),
         children: [
+          if (activeList != null) ...[
+            const ActiveShoppingListBar(),
+            const SizedBox(height: 12),
+          ],
           _MarketSelectorCard(
             market: market,
             onTap: busy ? null : _chooseMarket,
@@ -658,12 +720,20 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
             ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: busy ? null : _openTools,
+        tooltip: 'Mais ferramentas',
+        backgroundColor: AppTheme.emerald,
+        foregroundColor: Colors.white,
+        shape: const CircleBorder(),
+        elevation: 5,
+        child: const Icon(Icons.add_rounded, size: 30),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
       bottomNavigationBar: _CheckoutBar(
         isFinalizing: _isFinalizing,
         canFinalize: cart.isNotEmpty,
         onCamera: busy ? null : _openScanner,
-        onManual: busy ? null : _addManualItem,
-        onVoice: busy ? null : _openVoiceInput,
         onFinalize: cart.isEmpty || busy ? null : _finishPurchase,
       ),
     );
@@ -1156,7 +1226,7 @@ class _EmptyCartCard extends StatelessWidget {
           const SizedBox(height: 5),
           const Text(
             'Toque em "Ler Etiquetas (Câmera)" para escanear um preço, '
-            'ou adicione manualmente.',
+            'ou use o + para entrada manual, voz e ferramentas.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12,
@@ -1477,16 +1547,12 @@ class _CheckoutBar extends StatelessWidget {
   final bool isFinalizing;
   final bool canFinalize;
   final VoidCallback? onCamera;
-  final VoidCallback? onManual;
-  final VoidCallback? onVoice;
   final VoidCallback? onFinalize;
 
   const _CheckoutBar({
     required this.isFinalizing,
     required this.canFinalize,
     required this.onCamera,
-    required this.onManual,
-    required this.onVoice,
     required this.onFinalize,
   });
 
@@ -1514,29 +1580,12 @@ class _CheckoutBar extends StatelessWidget {
               width: double.infinity,
               child: FilledButton.icon(
                 onPressed: onCamera,
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size(0, 52),
+                ),
                 icon: const Icon(Icons.photo_camera_rounded, size: 21),
                 label: const Text('Ler Etiquetas (Câmera)'),
               ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onManual,
-                    icon: const Icon(Icons.keyboard_rounded, size: 19),
-                    label: const Text('Manual'),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onVoice,
-                    icon: const Icon(Icons.mic_rounded, size: 19),
-                    label: const Text('Voz'),
-                  ),
-                ),
-              ],
             ),
             const SizedBox(height: 10),
             SizedBox(

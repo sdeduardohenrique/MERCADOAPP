@@ -10,6 +10,7 @@ import 'package:soma_ai/core/services/location_service.dart';
 import 'package:soma_ai/core/utils/formatters.dart';
 import 'package:soma_ai/features/cart/presentation/active_purchase_screen.dart';
 import 'package:soma_ai/features/cart/presentation/providers/cart_provider.dart';
+import 'package:soma_ai/features/cart/presentation/purchase_success_screen.dart';
 import 'package:soma_ai/features/community/domain/market_service.dart';
 import 'package:soma_ai/features/community/presentation/providers/market_provider.dart';
 import 'package:soma_ai/features/home/presentation/providers/purchase_history_provider.dart';
@@ -143,7 +144,11 @@ void main() {
 
     expect(find.text('Seu carrinho está vazio'), findsOneWidget);
 
-    await tester.tap(find.text('Manual'));
+    await tester.tap(find.byType(FloatingActionButton));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Ferramentas de Compra'), findsOneWidget);
+    await tester.tap(find.text('Entrada Manual'));
     await tester.pumpAndSettle();
 
     expect(find.text('Adicionar item manualmente'), findsOneWidget);
@@ -221,6 +226,10 @@ void main() {
   testWidgets('finalizar compra limpa o carrinho e volta ao Dashboard', (
     tester,
   ) async {
+    tester.view.physicalSize = const Size(430, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
     final container = ProviderContainer();
     addTearDown(container.dispose);
     container.read(cartProvider.notifier).addItem(_item());
@@ -246,7 +255,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(ActivePurchaseScreen), findsNothing);
+    expect(find.byType(PurchaseSuccessScreen), findsOneWidget);
+    expect(find.text('Compra finalizada!'), findsOneWidget);
     expect(find.text('Compra finalizada com sucesso!'), findsOneWidget);
     expect(container.read(cartProvider), isEmpty);
+
+    final back = find.text('Voltar ao início');
+    await tester.ensureVisible(back);
+    await tester.tap(back);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(PurchaseSuccessScreen), findsNothing);
+    expect(find.text('Iniciar nova compra'), findsOneWidget);
   });
 }

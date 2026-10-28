@@ -13,7 +13,10 @@ import '../../community/presentation/providers/market_provider.dart';
 import '../../community_alerts/presentation/providers/alert_preferences_provider.dart';
 import '../../home/presentation/providers/purchase_history_provider.dart';
 import '../../home/presentation/providers/dashboard_period_provider.dart';
+import '../../shopping_list/presentation/providers/shopping_lists_provider.dart';
 import 'providers/profile_provider.dart';
+import 'widgets/edit_profile_sheet.dart';
+import 'widgets/profile_avatar.dart';
 
 /// Aba Perfil: dados do utilizador, estatísticas e preferências.
 class ProfileScreen extends ConsumerStatefulWidget {
@@ -25,6 +28,8 @@ class ProfileScreen extends ConsumerStatefulWidget {
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   bool _pushEnabled = true;
+
+  Future<void> _openEditProfile() => showEditProfileSheet(context);
 
   @override
   Widget build(BuildContext context) {
@@ -53,7 +58,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
             ],
           ),
           const SizedBox(height: 16),
-          _ProfileCard(profile: profile),
+          _ProfileCard(profile: profile, onEdit: _openEditProfile),
           const SizedBox(height: 14),
           IntrinsicHeight(
             child: Row(
@@ -293,6 +298,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       // Nada de Supabase: apenas limpa o estado local do visitante.
       ref.read(cartProvider.notifier).clear();
       ref.read(selectedMarketProvider.notifier).clear();
+      ref.read(activeShoppingListIdProvider.notifier).clear();
       await ref.read(purchaseHistoryProvider.notifier).clearHistory();
       await ref.read(guestSessionProvider.notifier).clear();
       if (!mounted) return;
@@ -314,6 +320,8 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ref.invalidate(dashboardPeriodProvider);
       ref.invalidate(alertPreferencesProvider);
       ref.invalidate(userProfileProvider);
+      ref.invalidate(shoppingListsProvider);
+      ref.read(activeShoppingListIdProvider.notifier).clear();
 
       // Navigate to login screen (AuthGate will handle redirect)
       if (mounted) {
@@ -410,15 +418,14 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
 
 class _ProfileCard extends StatelessWidget {
   final UserProfile profile;
+  final VoidCallback onEdit;
 
-  const _ProfileCard({required this.profile});
+  const _ProfileCard({required this.profile, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: AppTheme.primaryGradient,
         borderRadius: BorderRadius.circular(AppTheme.radiusLg),
         boxShadow: [
           BoxShadow(
@@ -428,105 +435,132 @@ class _ProfileCard extends StatelessWidget {
           ),
         ],
       ),
-      child: Row(
-        children: [
-          Container(
-            width: 62,
-            height: 62,
-            decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Colors.white.withValues(alpha: 0.4),
-                width: 2,
-              ),
-            ),
-            alignment: Alignment.center,
-            child: Text(
-              profile.initials,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  profile.name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -0.3,
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+        clipBehavior: Clip.antiAlias,
+        child: Ink(
+          decoration: const BoxDecoration(gradient: AppTheme.primaryGradient),
+          child: InkWell(
+            onTap: onEdit,
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Row(
+                children: [
+                  ProfileAvatar(
+                    initials: profile.initials,
+                    imageUrl: profile.avatarUrl,
+                    size: 62,
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  profile.email,
-                  style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.75),
-                    fontSize: 11.5,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      Icons.place_rounded,
-                      size: 12,
-                      color: Colors.white.withValues(alpha: 0.75),
-                    ),
-                    const SizedBox(width: 3),
-                    Text(
-                      profile.city,
-                      style: TextStyle(
-                        color: Colors.white.withValues(alpha: 0.75),
-                        fontSize: 10.5,
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 3,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.16),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Text(
-                        'Desde ${profile.memberSinceLabel}',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w600,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          profile.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                          ),
                         ),
-                      ),
+                        const SizedBox(height: 2),
+                        Text(
+                          profile.isGuest ? 'Modo visitante' : profile.email,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.75),
+                            fontSize: 11.5,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        if (profile.isGuest)
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.shield_outlined,
+                                size: 12,
+                                color: Colors.white.withValues(alpha: 0.75),
+                              ),
+                              const SizedBox(width: 4),
+                              Flexible(
+                                child: Text(
+                                  'Apelido salvo só neste aparelho',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        else
+                          Row(
+                            children: [
+                              Icon(
+                                Icons.place_rounded,
+                                size: 12,
+                                color: Colors.white.withValues(alpha: 0.75),
+                              ),
+                              const SizedBox(width: 3),
+                              Flexible(
+                                child: Text(
+                                  profile.city.isEmpty
+                                      ? 'Localização ativa'
+                                      : profile.city,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: TextStyle(
+                                    color: Colors.white.withValues(alpha: 0.75),
+                                    fontSize: 10.5,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 7,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.16),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: Text(
+                                  'Desde ${profile.memberSinceLabel}',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                      ],
                     ),
-                  ],
-                ),
-              ],
+                  ),
+                  IconButton(
+                    onPressed: onEdit,
+                    tooltip: 'Editar perfil',
+                    icon: const Icon(
+                      Icons.edit_rounded,
+                      color: Colors.white,
+                      size: 20,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
-          IconButton(
-            onPressed: () {
-              ScaffoldMessenger.of(context)
-                ..hideCurrentSnackBar()
-                ..showSnackBar(
-                  const SnackBar(
-                    content: Text('Edição de perfil chega na próxima versão.'),
-                  ),
-                );
-            },
-            tooltip: 'Editar perfil',
-            icon: const Icon(Icons.edit_rounded, color: Colors.white, size: 20),
-          ),
-        ],
+        ),
       ),
     );
   }

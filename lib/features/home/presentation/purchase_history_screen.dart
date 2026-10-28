@@ -7,6 +7,7 @@ import '../../../../core/utils/formatters.dart';
 import '../domain/purchase_history_sync_service.dart';
 import 'edit_purchase_screen.dart';
 import 'providers/purchase_history_provider.dart';
+import 'widgets/purchase_share_button.dart';
 
 /// Histórico completo de compras salvas no dispositivo.
 class PurchaseHistoryScreen extends ConsumerWidget {
@@ -436,6 +437,7 @@ class PurchaseDetailScreen extends ConsumerWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
         actions: [
+          PurchaseShareButton(purchase: purchase, expanded: false),
           IconButton(
             icon: const Icon(Icons.edit_rounded),
             tooltip: 'Editar compra',
@@ -520,18 +522,24 @@ class PurchaseDetailScreen extends ConsumerWidget {
                   color: AppTheme.emerald,
                 ),
                 const SizedBox(width: 5),
-                Text(
-                  'Você economizou ${Formatters.currency(purchase.savings)} com os alertas',
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.w600,
-                    color: AppTheme.emerald,
+                Flexible(
+                  child: Text(
+                    'Você economizou ${Formatters.currency(purchase.savings)} '
+                    'com ofertas e alertas',
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.emerald,
+                    ),
                   ),
                 ),
               ],
             ),
           ],
-          const SizedBox(height: 22),
+          const SizedBox(height: 18),
+          PurchaseShareButton(purchase: purchase),
+          const SizedBox(height: 14),
           const Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [

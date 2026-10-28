@@ -1,7 +1,11 @@
+import 'dart:async';
+import 'dart:typed_data';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/providers/session_provider.dart';
 import '../../../../core/services/supabase_service.dart';
+import '../../domain/profile_service.dart';
 
 /// Perfil exibido no Dashboard e na aba Perfil.
 ///
@@ -13,6 +17,7 @@ class UserProfile {
   final String city;
   final DateTime memberSince;
   final bool isGuest;
+  final String? avatarUrl;
 
   const UserProfile({
     required this.name,
@@ -20,6 +25,7 @@ class UserProfile {
     required this.city,
     required this.memberSince,
     this.isGuest = false,
+    this.avatarUrl,
   });
 
   String get firstName => name.trim().split(RegExp(r'\s+')).first;
@@ -74,11 +80,68 @@ final userProfileProvider = Provider<UserProfile>((ref) {
 
   final createdAt = DateTime.tryParse(user?.createdAt ?? '');
   final city = (metadata['city'] ?? metadata['cidade'] ?? '').toString().trim();
+  final avatarUrl =
+      (metadata['avatar_url'] ?? metadata['picture'] ?? '').toString().trim();
 
   return UserProfile(
     name: name,
     email: email,
     city: city,
     memberSince: createdAt ?? DateTime.now(),
+    avatarUrl: avatarUrl.isEmpty ? null : avatarUrl,
   );
 });
+
+final profileServiceProvider = Provider<ProfileService>((ref) {
+  return const ProfileService();
+});
+
+/// Controla a edição do perfil e mantém o estado da operação para a UI.
+class ProfileController extends AsyncNotifier<void> {
+  @override
+  FutureOr<void> build() {}
+
+  /// Salva nome/avatar.
+  ///
+  /// Retorna `null` em caso de sucesso ou a mensagem amigável de erro.
+  Future<String?> updateProfile({
+    required String name,
+    Uint8List? avatarBytes,
+    String? avatarContentType,
+    String? avatarExtension,
+  }) async {
+    state = const AsyncLoading();
+
+    try {
+      final guest = ref.read(guestSessionProvider);
+      if (guest != null) {
+        // Visitante: só o apelido, sempre local. Foto exige conta.
+        if (avatarBytes != null) {
+          throw const ProfileUpdateException(
+            'Crie uma conta gratuita para usar foto de perfil.',
+          );
+        }
+        await ref.read(guestSessionProvider.notifier).start(name);
+      } else {
+        await ref.read(profileServiceProvider).updateProfile(
+              displayName: name,
+              avatarBytes: avatarBytes,
+              avatarContentType: avatarContentType,
+              avatarExtension: avatarExtension,
+            );
+
+        // Metadados mudaram: recompõe o perfil e atualiza Dashboard/Card.
+        ref.invalidate(userProfileProvider);
+      }
+
+      state = const AsyncData(null);
+      return null;
+    } catch (error) {
+      state = AsyncError(error, StackTrace.current);
+      return ProfileUpdateException.messageFor(error);
+    }
+  }
+}
+
+final profileControllerProvider =
+    AsyncNotifierProvider<ProfileController, void>(ProfileController.new);

@@ -144,7 +144,7 @@ final monthlySpendingProvider = Provider<double>((ref) {
       .fold(0.0, (sum, purchase) => sum + purchase.total);
 });
 
-/// Total economizado no mês corrente (somatório dos alertas).
+/// Total economizado no mês corrente (ofertas + alertas).
 final monthlySavingsProvider = Provider<double>((ref) {
   return ref
       .watch(monthlyPurchasesProvider)

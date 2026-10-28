@@ -6,11 +6,11 @@ import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../cart/presentation/active_purchase_screen.dart';
 import '../../cart/presentation/providers/cart_provider.dart';
-import '../../cart/presentation/providers/purchase_budget_provider.dart';
-import '../../cart/presentation/widgets/purchase_budget_sheet.dart';
+import '../../cart/presentation/purchase_setup_flow.dart';
 import '../../community/presentation/providers/market_provider.dart';
-import '../../community/presentation/widgets/market_selection_sheet.dart';
 import '../../profile/presentation/providers/profile_provider.dart';
+import '../../shopping_list/presentation/providers/shopping_lists_provider.dart';
+import '../../shopping_list/presentation/widgets/shopping_lists_shortcut.dart';
 import 'providers/dashboard_period_provider.dart';
 import 'providers/purchase_history_provider.dart';
 import 'purchase_history_screen.dart';
@@ -53,45 +53,13 @@ class _HomeDashboardScreenState extends ConsumerState<HomeDashboardScreen> {
       return;
     }
 
+    // Compra nova a partir da Home não herda o checklist de uma lista antiga.
+    ref.read(activeShoppingListIdProvider.notifier).clear();
+
     setState(() => _startingPurchase = true);
     try {
-      final result = await showMarketSelectionSheet(context);
-      if (!mounted || result.action == MarketSelectionAction.dismissed) {
-        return;
-      }
-
-      final market = result.market;
-      if (market == null) {
-        ref.read(selectedMarketProvider.notifier).clear();
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Compra sem mercado: os preços ficarão apenas no seu histórico.',
-              ),
-            ),
-          );
-      } else {
-        ref.read(selectedMarketProvider.notifier).select(market);
-
-        if (!market.isRemoto) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Mercado salvo neste dispositivo. A sincronização acontece quando houver conexão.',
-                ),
-              ),
-            );
-        }
-      }
-
-      // Orçamento é opcional e só é perguntado ao iniciar uma compra nova.
-      final budget = await showPurchaseBudgetSheet(context);
-      if (!mounted) return;
-      ref.read(purchaseBudgetProvider.notifier).setBudget(budget?.budget);
+      final ready = await prepareNewPurchase(context, ref);
+      if (!mounted || !ready) return;
 
       await _openActivePurchase();
     } finally {
@@ -203,8 +171,9 @@ class _HomeDashboardScreenState extends ConsumerState<HomeDashboardScreen> {
                     iconBackground: AppTheme.lime,
                     label: 'Você economizou',
                     value: Formatters.currency(savings),
-                    caption:
-                        savings > 0 ? 'Graças aos alertas' : 'Ative os alertas',
+                    caption: savings > 0
+                        ? 'Com ofertas e alertas'
+                        : 'Ative os alertas',
                     valueColor: AppTheme.emerald,
                     highlight: savings > 0,
                   ),
@@ -212,6 +181,8 @@ class _HomeDashboardScreenState extends ConsumerState<HomeDashboardScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 14),
+          const ShoppingListsShortcut(),
           const SizedBox(height: 28),
           _SectionHeader(
             title: 'Últimas compras',

@@ -10,7 +10,7 @@ class Purchase extends Equatable {
   final DateTime date;
   final List<PurchaseItem> items;
 
-  /// Economia identificada pelos alertas da comunidade durante a compra.
+  /// Economia identificada por promoções e alertas da comunidade.
   final double savings;
 
   const Purchase({

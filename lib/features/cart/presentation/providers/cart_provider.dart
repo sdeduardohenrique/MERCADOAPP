@@ -1,12 +1,24 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
 import '../../../../core/models/cart_item.dart';
+import '../../../shopping_list/presentation/providers/shopping_lists_provider.dart';
 
 /// Cart state notifier
 class CartNotifier extends StateNotifier<List<CartItem>> {
-  CartNotifier() : super([]);
+  CartNotifier({Ref? ref})
+      : _ref = ref,
+        super([]);
+
+  final Ref? _ref;
 
   /// Adds item to cart, merging when the same EAN, pricing mode and price
   /// match. Different prices stay as separate lines so the receipt is honest.
+  ///
+  /// Depois de inserir, tenta riscar automaticamente o item correspondente
+  /// na lista ativa da compra (quando o provider está disponível).
   void addItem(CartItem item) {
     if (item.ean != null && item.ean!.isNotEmpty) {
       final existingIndex = state.indexWhere(
@@ -33,10 +45,27 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
           merged.withCalculatedTotal(),
           ...state.sublist(existingIndex + 1),
         ];
+        _markActiveShoppingList(merged.name);
         return;
       }
     }
     state = [...state, item.withCalculatedTotal()];
+    _markActiveShoppingList(item.name);
+  }
+
+  void _markActiveShoppingList(String productName) {
+    final ref = _ref;
+    if (ref == null) return;
+
+    unawaited(
+      ref
+          .read(shoppingListsProvider.notifier)
+          .markBoughtMatching(productName)
+          .catchError((Object error) {
+        debugPrint('[SomaAí] Não foi possível riscar a lista ativa: $error');
+        return null;
+      }),
+    );
   }
 
   /// Removes item from cart
@@ -136,7 +165,7 @@ class CartNotifier extends StateNotifier<List<CartItem>> {
 
 /// Cart provider
 final cartProvider = StateNotifierProvider<CartNotifier, List<CartItem>>((ref) {
-  return CartNotifier();
+  return CartNotifier(ref: ref);
 });
 
 /// Derived providers for cart totals

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:soma_ai/features/auth/presentation/login_screen.dart';
 import 'package:soma_ai/features/shell/presentation/app_shell.dart';
@@ -11,6 +12,9 @@ import 'package:soma_ai/main.dart';
 Future<void> _noopBootstrap() async {}
 
 void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({});
+  });
   group('SplashScreen', () {
     testWidgets('exibe a logo SVG e o indicador de carregamento',
         (WidgetTester tester) async {
@@ -33,7 +37,8 @@ void main() {
   });
 
   group('AuthGate', () {
-    testWidgets('mostra splash por 2500ms e depois vai para LoginScreen (sem auth)',
+    testWidgets(
+        'mostra splash por 2500ms e depois vai para LoginScreen (sem auth)',
         (WidgetTester tester) async {
       await tester.pumpWidget(
         const ProviderScope(
@@ -86,7 +91,8 @@ void main() {
       );
 
       // Tenta submeter sem preencher - usa o botão "Entrar com email"
-      final enterButton = find.widgetWithText(ElevatedButton, 'Entrar com email');
+      final enterButton =
+          find.widgetWithText(ElevatedButton, 'Entrar com email');
       await tester.ensureVisible(enterButton);
       await tester.tap(enterButton);
       await tester.pump();
@@ -94,8 +100,6 @@ void main() {
       expect(find.text('Informe seu email'), findsOneWidget);
       expect(find.text('Informe sua senha'), findsOneWidget);
     });
-
-    
 
     testWidgets('navega para tela de recuperação de senha',
         (WidgetTester tester) async {
@@ -112,7 +116,7 @@ void main() {
   });
 
   group('Dashboard', () {
-    testWidgets('mostra o CTA de nova compra e as 3 abas', (tester) async {
+    testWidgets('mostra o CTA de nova compra e as 4 abas', (tester) async {
       await tester.pumpWidget(
         const ProviderScope(
           child: MaterialApp(home: AppShell()),
@@ -122,6 +126,7 @@ void main() {
 
       expect(find.text('Iniciar nova compra'), findsOneWidget);
       expect(find.text('Início'), findsOneWidget);
+      expect(find.text('Minhas Listas'), findsOneWidget);
       expect(find.text('Comunidade'), findsOneWidget);
       expect(find.text('Perfil'), findsOneWidget);
 
@@ -131,6 +136,21 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Últimas compras'), findsOneWidget);
+    });
+
+    testWidgets('troca de aba ao tocar em Minhas Listas', (tester) async {
+      await tester.pumpWidget(
+        const ProviderScope(
+          child: MaterialApp(home: AppShell()),
+        ),
+      );
+      await tester.pump();
+
+      await tester.tap(find.text('Minhas Listas'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('PLANEJAMENTO E ECONOMIA'), findsOneWidget);
+      expect(find.text('Sua primeira lista começa aqui'), findsOneWidget);
     });
 
     testWidgets('troca de aba ao tocar em Comunidade', (tester) async {

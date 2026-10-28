@@ -65,6 +65,12 @@ class Formatters {
   static String longDate(DateTime date) =>
       '${date.day} de ${_monthsLong[date.month - 1]} de ${date.year}';
 
+  /// 28/10/2026
+  static String numericDate(DateTime date) =>
+      '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/'
+      '${date.year}';
+
   /// Outubro
   static String monthName(DateTime date) {
     final name = _monthsLong[date.month - 1];

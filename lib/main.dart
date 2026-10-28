@@ -14,6 +14,7 @@ import 'core/services/supabase_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/login_screen.dart';
 import 'features/shell/presentation/app_shell.dart';
+import 'features/shopping_list/presentation/providers/shopping_lists_provider.dart';
 import 'features/splash/presentation/splash_screen.dart';
 
 void main() {
@@ -135,6 +136,14 @@ class _AuthGateState extends ConsumerState<AuthGate> {
       _status =
           user != null ? AuthStatus.authenticated : AuthStatus.unauthenticated;
     });
+    // As listas são isoladas por conta: garante uma leitura limpa com o
+    // `user_id` correto depois que a sessão inicial foi restaurada.
+    _resetShoppingLists();
+  }
+
+  void _resetShoppingLists() {
+    ref.invalidate(shoppingListsProvider);
+    ref.read(activeShoppingListIdProvider.notifier).clear();
   }
 
   void _listenToAuthChanges() {
@@ -148,6 +157,7 @@ class _AuthGateState extends ConsumerState<AuthGate> {
       // Se estava autenticado e agora não está -> logout forçado
       if (_status == AuthStatus.authenticated && user == null) {
         setState(() => _status = AuthStatus.unauthenticated);
+        _resetShoppingLists();
 
         // Mostra snackbar informando que a sessão expirou
         ScaffoldMessenger.of(context).showSnackBar(
@@ -161,6 +171,7 @@ class _AuthGateState extends ConsumerState<AuthGate> {
       // Se não estava autenticado e agora está -> login detectado
       else if (_status == AuthStatus.unauthenticated && user != null) {
         setState(() => _status = AuthStatus.authenticated);
+        _resetShoppingLists();
       }
     }, onError: (error) {
       // Em caso de erro no stream, assume não autenticado por segurança

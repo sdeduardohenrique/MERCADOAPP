@@ -4,12 +4,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shimmer/shimmer.dart';
 
 import '../../../core/models/community_offer.dart';
+import '../../../core/providers/session_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
+import '../../auth/presentation/login_screen.dart';
+import '../../cart/presentation/providers/cart_provider.dart';
+import '../../home/presentation/providers/purchase_history_provider.dart';
 import '../domain/community_service.dart';
 import 'providers/community_filter_provider.dart';
+import 'providers/market_provider.dart';
 import 'widgets/community_location_sheet.dart';
 import 'widgets/community_offer_details_sheet.dart';
+import 'widgets/guest_community_lock.dart';
 import 'widgets/offer_contribution_sheet.dart';
 
 class CommunityScreen extends ConsumerStatefulWidget {
@@ -53,6 +59,22 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
     } catch (_) {
       // O estado de erro é renderizado pelo próprio provider.
     }
+  }
+
+  /// Encerra o modo visitante, apaga a memória local e deixa o AuthGate
+  /// levar para a tela de login/cadastro.
+  Future<void> _createAccountFromGuest() async {
+    ref.read(cartProvider.notifier).clear();
+    ref.read(selectedMarketProvider.notifier).clear();
+    await ref.read(purchaseHistoryProvider.notifier).clearHistory();
+    await ref.read(guestSessionProvider.notifier).clear();
+    if (!mounted) return;
+    // O AuthGate pode não estar no topo da pilha (AppShell é uma rota nova),
+    // por isso navegamos explicitamente para o login/cadastro.
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
   }
 
   void _selectFilter(int index) {
@@ -103,6 +125,13 @@ class _CommunityScreenState extends ConsumerState<CommunityScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Bloqueio antes de qualquer leitura: visitante nunca consulta a nuvem.
+    if (ref.watch(isGuestProvider)) {
+      return GuestCommunityLock(
+        onCreateAccount: _createAccountFromGuest,
+      );
+    }
+
     final offersAsync = ref.watch(communityOffersProvider);
     final filter = ref.watch(communityFilterProvider);
     final offers = _sorted(offersAsync.valueOrNull ?? const []);

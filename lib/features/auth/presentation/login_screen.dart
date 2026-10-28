@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
+import '../../../core/providers/session_provider.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../shell/presentation/app_shell.dart';
 import '../domain/auth_service.dart';
@@ -53,7 +54,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
 
       result.when(
-        success: (user) {
+        success: (user) async {
+          await ref.read(guestSessionProvider.notifier).clear();
+          if (!mounted) return;
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const AppShell()),
             (route) => false,
@@ -85,7 +88,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       if (!mounted) return;
 
       result.when(
-        success: (user) {
+        success: (user) async {
+          await ref.read(guestSessionProvider.notifier).clear();
+          if (!mounted) return;
           Navigator.of(context).pushAndRemoveUntil(
             MaterialPageRoute(builder: (_) => const AppShell()),
             (route) => false,
@@ -107,7 +112,19 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     }
   }
 
-  void _continueAsGuest() {
+  Future<void> _continueAsGuest() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _GuestNameDialog(),
+    );
+
+    if (!mounted || name == null) return;
+
+    // Isolamento total: apenas o apelido fica salvo no dispositivo. Nenhuma
+    // conta é criada e nenhuma chamada ao Supabase é feita.
+    await ref.read(guestSessionProvider.notifier).start(name);
+    if (!mounted) return;
+
     Navigator.of(context).pushAndRemoveUntil(
       MaterialPageRoute(builder: (_) => const AppShell()),
       (route) => false,
@@ -196,7 +213,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             decoration: InputDecoration(
                               labelText: 'Email',
                               hintText: 'voce@exemplo.com',
-                              prefixIcon: const Icon(Icons.email_outlined, color: AppTheme.muted),
+                              prefixIcon: const Icon(Icons.email_outlined,
+                                  color: AppTheme.muted),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
                                 borderSide: BorderSide(color: AppTheme.line),
@@ -207,7 +225,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
+                                borderSide: const BorderSide(
+                                    color: AppTheme.emeraldDark, width: 2),
                               ),
                               filled: true,
                               fillColor: AppTheme.background,
@@ -237,13 +256,17 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                             decoration: InputDecoration(
                               labelText: 'Senha',
                               hintText: '••••••••',
-                              prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.muted),
+                              prefixIcon: const Icon(Icons.lock_outline_rounded,
+                                  color: AppTheme.muted),
                               suffixIcon: IconButton(
                                 icon: Icon(
-                                  _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                                  _obscurePassword
+                                      ? Icons.visibility_outlined
+                                      : Icons.visibility_off_outlined,
                                   color: AppTheme.muted,
                                 ),
-                                onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                                onPressed: () => setState(
+                                    () => _obscurePassword = !_obscurePassword),
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
@@ -255,7 +278,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(color: AppTheme.emeraldDark, width: 2),
+                                borderSide: const BorderSide(
+                                    color: AppTheme.emeraldDark, width: 2),
                               ),
                               filled: true,
                               fillColor: AppTheme.background,
@@ -278,16 +302,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                               decoration: BoxDecoration(
                                 color: const Color(0xFFFDECEC),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: const Color(0xFFF04438)),
+                                border:
+                                    Border.all(color: const Color(0xFFF04438)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.error_outline_rounded, color: Color(0xFFB42318), size: 20),
+                                  const Icon(Icons.error_outline_rounded,
+                                      color: Color(0xFFB42318), size: 20),
                                   const SizedBox(width: 8),
                                   Expanded(
                                     child: Text(
                                       _errorMessage!,
-                                      style: const TextStyle(color: Color(0xFFB42318), fontSize: 13, fontWeight: FontWeight.w600),
+                                      style: const TextStyle(
+                                          color: Color(0xFFB42318),
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w600),
                                     ),
                                   ),
                                 ],
@@ -304,16 +333,25 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 backgroundColor: AppTheme.emeraldDark,
                                 foregroundColor: Colors.white,
                                 elevation: 0,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                                disabledBackgroundColor: AppTheme.emeraldDark.withValues(alpha: 0.5),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(14)),
+                                disabledBackgroundColor:
+                                    AppTheme.emeraldDark.withValues(alpha: 0.5),
                               ),
                               child: _isLoading
                                   ? const SizedBox(
                                       width: 24,
                                       height: 24,
-                                      child: CircularProgressIndicator(strokeWidth: 2.5, valueColor: AlwaysStoppedAnimation(Colors.white)),
+                                      child: CircularProgressIndicator(
+                                          strokeWidth: 2.5,
+                                          valueColor: AlwaysStoppedAnimation(
+                                              Colors.white)),
                                     )
-                                  : const Text('Entrar com email', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+                                  : const Text('Entrar com email',
+                                      style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 0.3)),
                             ),
                           ),
                         ],
@@ -324,7 +362,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Divisor "OU ENTRE COM"
                   Row(
                     children: [
-                      const Expanded(child: Divider(color: Colors.white38, thickness: 1)),
+                      const Expanded(
+                          child: Divider(color: Colors.white38, thickness: 1)),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 16),
                         child: Text('OU ENTRE COM',
@@ -333,7 +372,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                                 fontSize: 13,
                                 fontWeight: FontWeight.w600)),
                       ),
-                      const Expanded(child: Divider(color: Colors.white38, thickness: 1)),
+                      const Expanded(
+                          child: Divider(color: Colors.white38, thickness: 1)),
                     ],
                   ),
                   const SizedBox(height: 16),
@@ -353,7 +393,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Link "Esqueci a senha"
                   TextButton(
                     onPressed: () => Navigator.of(context).push(
-                        MaterialPageRoute(builder: (_) => const ForgotPasswordScreen())),
+                        MaterialPageRoute(
+                            builder: (_) => const ForgotPasswordScreen())),
                     child: Text(
                       'Esqueci a senha',
                       style: TextStyle(
@@ -369,13 +410,16 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   // Botão "Continuar como visitante"
                   TextButton.icon(
                     onPressed: _continueAsGuest,
-                    icon: Icon(Icons.person_outline_rounded, color: Colors.white.withValues(alpha: 0.85), size: 20),
+                    icon: Icon(Icons.person_outline_rounded,
+                        color: Colors.white.withValues(alpha: 0.85), size: 20),
                     label: Text(
                       'Continuar como visitante (modo offline)',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13.5, fontWeight: FontWeight.w600),
+                      style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.85),
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w600),
                     ),
                   ),
-                  
                 ],
               ),
             ),
@@ -441,6 +485,90 @@ class _GoogleLogo extends StatelessWidget {
         width: size,
         height: size,
       ),
+    );
+  }
+}
+
+/// Onboarding do visitante: só pede um apelido para personalizar o app.
+///
+/// Nada é enviado para a nuvem — o nome fica em `SharedPreferences`.
+class _GuestNameDialog extends StatefulWidget {
+  const _GuestNameDialog();
+
+  @override
+  State<_GuestNameDialog> createState() => _GuestNameDialogState();
+}
+
+class _GuestNameDialogState extends State<_GuestNameDialog> {
+  final _controller = TextEditingController();
+  String? _error;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final name = _controller.text.trim();
+    if (name.length < 2) {
+      setState(() => _error = 'Informe pelo menos 2 letras.');
+      return;
+    }
+    Navigator.of(context).pop(name);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      ),
+      title: const Text(
+        'Como você quer ser chamado?',
+        style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800),
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Usamos só o seu apelido para personalizar o app. '
+            'Suas compras ficam salvas apenas neste aparelho.',
+            style:
+                TextStyle(fontSize: 12.5, height: 1.4, color: AppTheme.muted),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            textCapitalization: TextCapitalization.words,
+            textInputAction: TextInputAction.done,
+            maxLength: 24,
+            onSubmitted: (_) => _submit(),
+            decoration: InputDecoration(
+              labelText: 'Seu nome ou apelido',
+              hintText: 'Ex.: Edu',
+              errorText: _error,
+              counterText: '',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton(
+          onPressed: _submit,
+          style: FilledButton.styleFrom(
+            backgroundColor: AppTheme.emerald,
+            foregroundColor: Colors.white,
+          ),
+          child: const Text('Entrar como visitante'),
+        ),
+      ],
     );
   }
 }

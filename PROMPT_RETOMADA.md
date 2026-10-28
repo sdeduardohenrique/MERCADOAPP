@@ -19,7 +19,7 @@ Execute as etapas abaixo em ordem estrita antes de aceitar qualquer modificaçã
    ```bash
    git log -1 --oneline
    ```
-   *O hash esperado do último commit é `83baba6` (`feat(market): integracao hibrida TomTom v3 + PostGIS e melhorias de sessao`).*
+   *O hash esperado do último commit inclui `83baba6` (integração híbrida TomTom v3 + PostGIS) e o commit dos 4 pilares de localização/visitante. Confira `git log -3 --oneline`.*
 3. Leia integralmente o arquivo `PROJECT_STATUS.md` na raiz para absorver o histórico arquitetural, métricas e pendências.
 
 ---
@@ -46,11 +46,11 @@ Antes de compilar qualquer binário ou tocar em código, garanta que a suíte de
    ```bash
    dart analyze lib test
    ```
-2. Execute a suíte completa de testes (101 testes automatizados):
+2. Execute a suíte completa de testes (110 testes automatizados):
    ```bash
    flutter test
    ```
-   *Todos os 101 testes devem passar sem falhas.*
+   *Todos os 110 testes devem passar sem falhas.*
 
 ---
 

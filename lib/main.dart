@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'core/bootstrap/app_bootstrap.dart';
 import 'core/constants/app_constants.dart';
+import 'core/providers/session_provider.dart';
 import 'core/services/supabase_service.dart';
 import 'core/theme/app_theme.dart';
 import 'features/auth/presentation/login_screen.dart';
@@ -97,8 +98,10 @@ class _AuthGateState extends ConsumerState<AuthGate> {
   @override
   void initState() {
     super.initState();
+    // Restaura o visitante em paralelo com a splash: se houver apelido salvo,
+    // o build reage e entra direto no app.
+    ref.read(guestSessionProvider.notifier).restore();
     _bootstrap();
-    _listenToAuthChanges();
   }
 
   Future<void> _bootstrap() async {
@@ -111,6 +114,9 @@ class _AuthGateState extends ConsumerState<AuthGate> {
 
     if (!mounted) return;
 
+    // Só agora o Supabase pode estar pronto: assina as mudanças de sessão.
+    _listenToAuthChanges();
+
     // Verifica estado inicial de autenticação de forma segura
     User? user;
     try {
@@ -120,8 +126,14 @@ class _AuthGateState extends ConsumerState<AuthGate> {
       user = null;
     }
 
+    // Conta real sempre vence: descarta qualquer resquício de visitante.
+    if (user != null) {
+      await ref.read(guestSessionProvider.notifier).clear();
+    }
+
     setState(() {
-      _status = user != null ? AuthStatus.authenticated : AuthStatus.unauthenticated;
+      _status =
+          user != null ? AuthStatus.authenticated : AuthStatus.unauthenticated;
     });
   }
 
@@ -166,13 +178,17 @@ class _AuthGateState extends ConsumerState<AuthGate> {
 
   @override
   Widget build(BuildContext context) {
+    final guest = ref.watch(guestSessionProvider);
+
     switch (_status) {
       case AuthStatus.initializing:
         return const SplashScreen();
       case AuthStatus.authenticated:
         return const AppShell();
       case AuthStatus.unauthenticated:
-        return const LoginScreen();
+        // O visitante entra no app sem conta; ao sair do modo visitante o
+        // AuthGate reage e volta para o login automaticamente.
+        return guest != null ? const AppShell() : const LoginScreen();
     }
   }
 }

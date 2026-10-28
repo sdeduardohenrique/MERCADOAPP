@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/providers/location_provider.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/theme/app_theme.dart';
-import '../../domain/market_service.dart';
 import '../providers/community_filter_provider.dart';
 
 Future<CommunityFilter?> showCommunityLocationSheet(
@@ -53,9 +53,8 @@ class _CommunityLocationSheetState
       _error = null;
     });
 
-    final result = await ref.read(marketServiceProvider).resolveLocation(
-          forceRefresh: true,
-        );
+    // Fonte única de localização: a mesma posição usada pelas buscas.
+    final result = await ref.read(locationProvider.notifier).refresh();
     if (!mounted) return;
 
     if (result.hasCoordinates) {

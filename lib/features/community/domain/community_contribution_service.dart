@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/models/cart_item.dart';
 import '../../../core/models/mercado.dart';
-import '../../../core/services/location_service.dart';
 import '../../../core/services/price_validation_service.dart';
 import '../../../core/services/supabase_service.dart';
 
@@ -39,9 +38,7 @@ class CommunityContributionService {
       if (submitter != null) {
         return await submitter(item: item, marketId: market.id);
       }
-      return await PriceValidationService(
-        LocationService(),
-      ).submitCommunityPrice(
+      return await PriceValidationService().submitCommunityPrice(
         item: item,
         storeId: market.id,
         price: item.unitPrice,

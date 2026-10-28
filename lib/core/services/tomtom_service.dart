@@ -71,9 +71,8 @@ class TomTomPlace {
 
   factory TomTomPlace.fromJson(Map<String, dynamic> json) {
     final position = json['position'];
-    final coordinates = position is Map
-        ? (position['coordinates'] as List<dynamic>?)
-        : null;
+    final coordinates =
+        position is Map ? (position['coordinates'] as List<dynamic>?) : null;
 
     double? coordinate(int index) {
       if (coordinates == null || coordinates.length <= index) return null;
@@ -222,27 +221,30 @@ class TomTomService {
 
   /// Busca mercados por nome (usada na pesquisa manual do BottomSheet).
   ///
-  /// Não restringe `poiTypes` para não esconder redes regionais que a TomTom
-  /// classifica como `wholesale_club`, `department_store` etc.
+  /// Quando [latitude]/[longitude] são informados, a busca é ancorada no ponto
+  /// atual e restrita a um círculo de [radiusMeters]. Sem esse filtro a TomTom
+  /// devolve redes de outras cidades/estados, o que confundia o utilizador.
   Future<List<TomTomPlace>> searchByName(
     String query, {
     double? latitude,
     double? longitude,
-    int limit = 20, double? radiusMeters,
+    double radiusMeters = 5000,
+    int limit = 20,
   }) async {
     final trimmed = query.trim();
     if (!isConfigured || trimmed.length < 2) return const [];
 
+    final hasOrigin = latitude != null && longitude != null;
+    final radius = radiusMeters.clamp(100, 50000).round();
+
     final cacheKey = 'name:${trimmed.toLowerCase()}:'
         '${latitude?.toStringAsFixed(3) ?? '-'},'
-        '${longitude?.toStringAsFixed(3) ?? '-'}:$limit';
+        '${longitude?.toStringAsFixed(3) ?? '-'}:$radius:$limit';
 
     final cached = _readCache(cacheKey);
     if (cached != null) return cached;
 
-    final origin = latitude != null && longitude != null
-        ? _point(latitude, longitude)
-        : null;
+    final origin = hasOrigin ? _point(latitude, longitude) : null;
 
     final body = <String, dynamic>{
       'query': trimmed,
@@ -253,6 +255,13 @@ class TomTomService {
         // Sem o filtro de categoria a busca por nome devolve farmácias e
         // postos com a mesma marca (ex.: "Drogaria Carrefour").
         'poiTypes': marketPoiTypes,
+        // Âncora + raio: limita a busca à região real do utilizador.
+        if (hasOrigin)
+          'geometry': {
+            'type': 'circle',
+            'center': [longitude, latitude],
+            'radiusInMeters': radius,
+          },
       },
       if (origin != null) ...{
         'origin': origin,
@@ -331,7 +340,8 @@ class TomTomService {
 
     try {
       final decoded = jsonDecode(response.body);
-      final results = decoded is Map<String, dynamic> ? decoded['results'] : null;
+      final results =
+          decoded is Map<String, dynamic> ? decoded['results'] : null;
       if (results is! List) return const [];
       return results
           .whereType<Map<String, dynamic>>()
@@ -368,7 +378,8 @@ class TomTomService {
       404 => 'Serviço de busca da TomTom não encontrado.',
       429 => 'Muitas buscas em pouco tempo. Tente novamente em instantes.',
       >= 500 => 'A TomTom está indisponível no momento.',
-      _ => detail ?? 'Falha ao consultar a TomTom (HTTP ${response.statusCode}).',
+      _ =>
+        detail ?? 'Falha ao consultar a TomTom (HTTP ${response.statusCode}).',
     };
 
     debugPrint(

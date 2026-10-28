@@ -4,19 +4,28 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/cart_item.dart';
 import '../models/community_price.dart';
 import '../utils/text_normalizer.dart';
+import '../providers/location_provider.dart';
 import 'location_service.dart';
+
+typedef LocationCoordinatesResolver = Future<LocationCoordinates?> Function();
 
 class PriceValidationService {
   // Lazy: só toca em Supabase.instance quando for realmente usar a rede.
   // Assim a tela abre normalmente em modo offline.
   late final SupabaseClient _supabase = Supabase.instance.client;
-  final LocationService _locationService;
+  final LocationCoordinatesResolver? _coordinatesResolver;
+
+  /// `false` no modo visitante: a comunidade nem é consultada.
+  final bool enabled;
 
   // In-memory cache for price validation results
   final Map<String, CachedAlert> _cache = {};
   static const Duration _cacheTtl = Duration(minutes: 5);
 
-  PriceValidationService(this._locationService);
+  PriceValidationService({
+    LocationCoordinatesResolver? coordinatesResolver,
+    this.enabled = true,
+  }) : _coordinatesResolver = coordinatesResolver;
 
   /// `true` quando o Supabase terminou de inicializar.
   bool get isOnline {
@@ -32,7 +41,7 @@ class PriceValidationService {
     required CartItem item,
     required double currentPrice,
   }) async {
-    if (!isOnline) return null;
+    if (!enabled || !isOnline) return null;
 
     final ean = item.ean?.trim();
     if (ean == null || ean.isEmpty) return null;
@@ -45,9 +54,9 @@ class PriceValidationService {
     }
 
     try {
-      // Get current location
-      final position = await _locationService.getCurrentPosition();
-      if (position == null) {
+      // Posição vem do provider global (fonte única), nunca do GPS da tela.
+      final coordinates = await _coordinatesResolver?.call();
+      if (coordinates == null) {
         _cacheResult(cacheKey, null);
         return null;
       }
@@ -57,8 +66,8 @@ class PriceValidationService {
         'find_better_prices_nearby',
         params: {
           'p_ean': ean,
-          'p_user_lat': position.latitude,
-          'p_user_lon': position.longitude,
+          'p_user_lat': coordinates.latitude,
+          'p_user_lon': coordinates.longitude,
           'p_current_price': currentPrice,
           'p_radius_km': 15,
           'p_limit': 3,
@@ -251,6 +260,11 @@ class CachedAlert {
 
 /// Riverpod provider
 final priceValidationServiceProvider = Provider<PriceValidationService>((ref) {
-  final locationService = ref.watch(locationServiceProvider);
-  return PriceValidationService(locationService);
+  return PriceValidationService(
+    coordinatesResolver: () async {
+      final result =
+          await ref.read(locationProvider.notifier).ensureCoordinates();
+      return result.coordinates;
+    },
+  );
 });

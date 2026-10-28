@@ -5,6 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'package:soma_ai/core/models/cart_item.dart';
 import 'package:soma_ai/core/models/mercado.dart';
+import 'package:soma_ai/core/providers/location_provider.dart';
 import 'package:soma_ai/core/services/location_service.dart';
 import 'package:soma_ai/core/utils/formatters.dart';
 import 'package:soma_ai/features/cart/presentation/active_purchase_screen.dart';
@@ -47,10 +48,6 @@ Widget _app(ProviderContainer container) {
 
 MarketService _withoutLocation() {
   return MarketService(
-    locationResolver: ({bool forceRefresh = true}) async =>
-        const LocationAccessResult.failure(
-      LocationAccessStatus.permissionDenied,
-    ),
     nearbyFetcher: ({
       required double latitude,
       required double longitude,
@@ -62,6 +59,7 @@ MarketService _withoutLocation() {
       String query, {
       double? latitude,
       double? longitude,
+      double radiusMeters = 5000,
     }) async =>
         const [],
     creator: ({
@@ -167,6 +165,14 @@ void main() {
     final container = ProviderContainer(
       overrides: [
         marketServiceProvider.overrideWithValue(_withoutLocation()),
+        // GPS negado de forma determinística (sem tocar no plugin real).
+        locationProvider.overrideWith(
+          (ref) => LocationNotifier(
+            resolver: () async => const LocationAccessResult.failure(
+              LocationAccessStatus.permissionDenied,
+            ),
+          ),
+        ),
       ],
     );
     addTearDown(container.dispose);

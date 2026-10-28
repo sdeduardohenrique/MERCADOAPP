@@ -1,8 +1,8 @@
 # SomaAí — Project Status & Architecture
 
-**Last Updated:** October 24, 2026
+**Last Updated:** October 28, 2026
 
-**Status:** ✅ APK release ARM64 (42,7 MB) validado no Redmi Note 11 com **fluxo híbrido de seleção de mercado** (PostGIS 100 m + fallback TomTom Places Search API v3 com upsert silencioso e badge de origem), **autenticação com isolamento por usuário** (Google OAuth + Email/Senha + Logout completo com invalidação de Riverpod), **eliminação de mocks em compras/perfil** e 101 testes automatizados passando.
+**Status:** ✅ APK release ARM64 (42,7 MB) validado no Redmi Note 11 com **os 4 pilares de localização/visitante entregues**: provider global de localização de alta precisão (fonte única), raio dinâmico 1/3/5/10 km na busca TomTom, modo visitante 100% local e bloqueio da Comunidade com CTA de cadastro. Fluxo híbrido PostGIS + TomTom, autenticação com isolamento por usuário e **110 testes automatizados passando**.
 
 ---
 
@@ -742,14 +742,15 @@ A câmera abre apenas por `Navigator.push` a partir do CTA.
 
 ## 📝 Próximos passos imediatos
 
-1. **Refatoração do Módulo de Localização & Busca Dinâmica (Roadmap Prioritário)**:
-   - **Pilar 1 (Localização Global)**: Migrar todo o consumo de GPS para `location_provider` Riverpod dedicado com `Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.best)`, descartando `getLastKnownPosition` e cache antigo para eliminar falso positivo de local.
-   - **Pilar 2 (Raio Dinâmico na TomTom)**: Adicionar controle visual de raio (ChoiceChips/Dropdown: 1 km, 3 km, 5 km, 10 km) com valor padrão de 3-5 km e passar coordenadas âncora + filtro circular no `TomTomService.searchByName`.
-   - **Pilar 3 (Modo Visitante 100% Local)**: Onboarding com dialog perguntando apelido ("Como você quer ser chamado?") e isolamento de compras/carrinho estritamente em storage local, sem requisições Supabase.
-   - **Pilar 4 (Bloqueio da Comunidade para Visitante)**: Empty state com ícone de cadeado amigável explicando a necessidade de conta gratuita e botão de CTA verde para ir ao cadastro.
+1. **✅ Concluído — Localização & Busca Dinâmica (4 pilares)**:
+   - **Pilar 1 (Localização Global)**: `lib/core/providers/location_provider.dart` é a fonte única (`LocationAccuracy.best`, sem `getLastKnownPosition`, descarta coordenada antiga em falha, log de auditoria com lat/lng/precisão). Mercado, comunidade e validação de preço consomem o provider.
+   - **Pilar 2 (Raio Dinâmico na TomTom)**: chips 1/3/5/10 km (padrão 5 km) no BottomSheet, filtro circular `center: [lng, lat]` + `radiusInMeters` no `TomTomService.searchByName`, busca reexecutada ao trocar o raio.
+   - **Pilar 3 (Modo Visitante 100% Local)**: dialog "Como você quer ser chamado?", apelido em `SharedPreferences`, `MarketService` com `allowRemote: false` (nenhuma leitura/escrita Supabase), alertas da comunidade desativados e compras apenas locais.
+   - **Pilar 4 (Bloqueio da Comunidade)**: empty state com cadeado + texto de conta gratuita + CTA verde "Criar minha conta", que limpa a sessão de visitante e volta ao Login/Cadastro.
 2. Trocar `applicationId` (`com.example.mercado_app` / `com.somaaiapp`) e gerar keystore própria para publicação na Play Store.
 3. Aplicar consolidação final de RLS policies (`tools/rls_isolation.sql`).
 4. Implementar entrada por voz (`speech_to_text`) e o checkout fiscal.
+5. Restringir a chave TomTom (Edge Function/painel) antes de produção e adicionar a atribuição oficial "Powered by TomTom".
 
 ---
 
@@ -757,9 +758,9 @@ A câmera abre apenas por `Navigator.push` a partir do CTA.
 
 - Build release ARM64: ~30–60 s (`tools/build_apk.sh`, split-per-abi)
 - APK release ARM64: **42,7 MB** (`somaai-arm64-release.apk`)
-- Testes: **101 passando** (`flutter test`)
+- Testes: **110 passando** (`flutter test`)
 - Análise estática: 0 erros / 0 warnings (`dart analyze lib test`)
-- Cota TomTom: consumo sob demanda apenas em fallback (quando PostGIS não encontra estabelecimentos num raio de 100m)
+- Cota TomTom: consumo sob demanda no fallback (PostGIS vazio) e na busca manual, sempre com filtro circular pelo raio escolhido
 
 ---
 

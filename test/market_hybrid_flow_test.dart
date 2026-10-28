@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:soma_ai/core/models/mercado.dart';
-import 'package:soma_ai/core/services/location_service.dart';
 import 'package:soma_ai/core/services/tomtom_service.dart';
 import 'package:soma_ai/features/community/domain/market_service.dart';
 
@@ -78,10 +77,6 @@ MarketService _service({
   bool failLocal = false,
 }) {
   return MarketService(
-    locationResolver: ({bool forceRefresh = true}) async =>
-        const LocationAccessResult.success(
-      LocationCoordinates(latitude: _latitude, longitude: _longitude),
-    ),
     nearbyFetcher: ({
       required double latitude,
       required double longitude,
@@ -161,8 +156,7 @@ void main() {
       );
     });
 
-    test('busca por nome filtra categorias de mercado e ordena por distância',
-        () async {
+    test('busca por nome ancora a coordenada e aplica o raio', () async {
       late Map<String, dynamic> sentBody;
       final service = TomTomService(
         apiKey: 'test-key',
@@ -184,10 +178,15 @@ void main() {
         'Carrefour',
         latitude: _latitude,
         longitude: _longitude,
+        radiusMeters: 3000,
       );
 
       final filters = sentBody['filters'] as Map<String, dynamic>;
+      final circle = filters['geometry'] as Map<String, dynamic>;
       expect(filters['poiTypes'], TomTomService.marketPoiTypes);
+      expect(circle['type'], 'circle');
+      expect(circle['center'], [_longitude, _latitude]);
+      expect(circle['radiusInMeters'], 3000);
       expect(places.map((p) => p.id), ['tt-near', 'tt-mid', 'tt-far']);
     });
   });
@@ -278,8 +277,7 @@ void main() {
       expect(called, isFalse);
     });
 
-    test('falha da TomTom não derruba o fluxo e devolve lista vazia',
-        () async {
+    test('falha da TomTom não derruba o fluxo e devolve lista vazia', () async {
       final service = _service(
         tomTom: _tomTom(
           statusCode: 500,

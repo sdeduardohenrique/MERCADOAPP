@@ -9,8 +9,9 @@ import '../../../../core/models/cart_item.dart';
 import '../../../../core/models/community_price.dart';
 import '../../../../core/models/mercado.dart';
 import '../../../../core/models/purchase.dart';
+import '../../../../core/providers/location_provider.dart';
+import '../../../../core/providers/session_provider.dart';
 import '../../../../core/services/label_photo_service.dart';
-import '../../../../core/services/location_service.dart';
 import '../../../../core/services/price_validation_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../../../core/utils/formatters.dart';
@@ -50,7 +51,15 @@ class _ActivePurchaseScreenState extends ConsumerState<ActivePurchaseScreen> {
   final Set<String> _alertedEans = <String>{};
 
   late final PriceValidationService _priceValidationService =
-      PriceValidationService(ref.read(locationServiceProvider));
+      PriceValidationService(
+    coordinatesResolver: () async {
+      final result =
+          await ref.read(locationProvider.notifier).ensureCoordinates();
+      return result.coordinates;
+    },
+    // Visitante não consulta a comunidade.
+    enabled: ref.read(guestSessionProvider) == null,
+  );
 
   Future<void> _openScanner() async {
     final item = await Navigator.of(context).push<CartItem>(

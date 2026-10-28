@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../core/providers/session_provider.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';
@@ -8,6 +9,7 @@ import '../../../core/widgets/somaai_logo.dart';
 import '../../auth/presentation/login_screen.dart';
 import '../../cart/presentation/providers/cart_provider.dart';
 import '../../cart/presentation/providers/purchase_budget_provider.dart';
+import '../../community/presentation/providers/market_provider.dart';
 import '../../community_alerts/presentation/providers/alert_preferences_provider.dart';
 import '../../home/presentation/providers/purchase_history_provider.dart';
 import '../../home/presentation/providers/dashboard_period_provider.dart';
@@ -190,8 +192,12 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                 _SettingTile(
                   icon: Icons.logout_rounded,
                   iconColor: AppTheme.red,
-                  title: 'Sair da conta',
-                  subtitle: 'Encerrar sessão e limpar dados locais',
+                  title: profile.isGuest
+                      ? 'Sair do modo visitante'
+                      : 'Sair da conta',
+                  subtitle: profile.isGuest
+                      ? 'Apagar os dados locais e voltar ao login'
+                      : 'Encerrar sessão e limpar dados locais',
                   titleColor: AppTheme.red,
                   onTap: _confirmLogout,
                 ),
@@ -254,13 +260,18 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   }
 
   Future<void> _confirmLogout() async {
+    final isGuest = ref.read(userProfileProvider).isGuest;
+
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('Sair da conta?'),
-        content: const Text(
-          'Ao sair da conta, todos os dados locais serão limpos. '
-          'Você voltará para a tela de login.',
+        title: Text(isGuest ? 'Sair do modo visitante?' : 'Sair da conta?'),
+        content: Text(
+          isGuest
+              ? 'Seu apelido, carrinho e compras salvas neste aparelho serão '
+                  'apagados. Você voltará para a tela de login.'
+              : 'Ao sair da conta, todos os dados locais serão limpos. '
+                  'Você voltará para a tela de login.',
         ),
         actions: [
           TextButton(
@@ -276,7 +287,23 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
       ),
     );
 
-    if (confirmed == true && mounted) {
+    if (confirmed != true || !mounted) return;
+
+    if (isGuest) {
+      // Nada de Supabase: apenas limpa o estado local do visitante.
+      ref.read(cartProvider.notifier).clear();
+      ref.read(selectedMarketProvider.notifier).clear();
+      await ref.read(purchaseHistoryProvider.notifier).clearHistory();
+      await ref.read(guestSessionProvider.notifier).clear();
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+      return;
+    }
+
+    if (mounted) {
       // 1. Sign out from Supabase
       await SupabaseService.signOut();
 

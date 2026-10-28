@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../../core/models/mercado.dart';
+import '../../../core/providers/session_provider.dart';
 import '../../../core/services/location_service.dart';
 import '../../../core/services/supabase_service.dart';
 import '../../../core/services/tomtom_service.dart';
@@ -25,9 +26,6 @@ class MarketCreationResult {
   bool get isRemote => market.isRemoto;
 }
 
-typedef MarketLocationResolver = Future<LocationAccessResult> Function({
-  bool forceRefresh,
-});
 typedef NearbyMarketsFetcher = Future<List<Mercado>> Function({
   required double latitude,
   required double longitude,
@@ -38,6 +36,7 @@ typedef MarketNameSearcher = Future<List<Mercado>> Function(
   String query, {
   double? latitude,
   double? longitude,
+  double radiusMeters,
 });
 typedef MarketCreator = Future<MarketCreationResult> Function({
   required String name,
@@ -55,32 +54,26 @@ typedef MarketCreator = Future<MarketCreationResult> Function({
 class MarketService {
   MarketService({
     LocationService? locationService,
-    MarketLocationResolver? locationResolver,
     NearbyMarketsFetcher? nearbyFetcher,
     MarketNameSearcher? nameSearcher,
     MarketCreator? creator,
     TomTomService? tomTomService,
+    bool allowRemote = true,
   })  : _locationService = locationService ?? LocationService(),
-        _locationResolver = locationResolver,
         _nearbyFetcher = nearbyFetcher,
         _nameSearcher = nameSearcher,
         _creator = creator,
-        _tomTomService = tomTomService;
+        _tomTomService = tomTomService,
+        _allowRemote = allowRemote;
 
   final LocationService _locationService;
-  final MarketLocationResolver? _locationResolver;
   final NearbyMarketsFetcher? _nearbyFetcher;
   final MarketNameSearcher? _nameSearcher;
   final MarketCreator? _creator;
   final TomTomService? _tomTomService;
 
-  Future<LocationAccessResult> resolveLocation({bool forceRefresh = true}) {
-    final resolver = _locationResolver;
-    if (resolver != null) return resolver(forceRefresh: forceRefresh);
-    return _locationService.resolveCurrentPosition(
-      forceRefresh: forceRefresh,
-    );
-  }
+  /// `false` no modo visitante: o app não lê nem grava na comunidade.
+  final bool _allowRemote;
 
   /// Busca híbrida de mercados próximos:
   ///
@@ -104,26 +97,34 @@ class MarketService {
     MarketServiceException? localError;
 
     try {
-      final local = fetcher != null
-          ? await fetcher(
-              latitude: latitude,
-              longitude: longitude,
-              radiusMeters: radiusMeters,
-              limit: limit,
-            )
-          : await _fetchNearbyFromSupabase(
-              latitude: latitude,
-              longitude: longitude,
-              radiusMeters: radiusMeters,
-              limit: limit,
-            );
-      for (final mercado in local) {
-        final externo = mercado.externalId;
-        if (externo != null && externo.isNotEmpty && !chaves.add('e:$externo')) {
-          continue;
+      // No modo visitante a comunidade é ignorada por completo: nenhuma
+      // leitura vai para o Supabase (evita RLS e mistura de identidades).
+      if (!_allowRemote) {
+        debugPrint('[MarketService] visitante: base interna ignorada.');
+      } else {
+        final local = fetcher != null
+            ? await fetcher(
+                latitude: latitude,
+                longitude: longitude,
+                radiusMeters: radiusMeters,
+                limit: limit,
+              )
+            : await _fetchNearbyFromSupabase(
+                latitude: latitude,
+                longitude: longitude,
+                radiusMeters: radiusMeters,
+                limit: limit,
+              );
+        for (final mercado in local) {
+          final externo = mercado.externalId;
+          if (externo != null &&
+              externo.isNotEmpty &&
+              !chaves.add('e:$externo')) {
+            continue;
+          }
+          if (!chaves.add('n:${_normalizeName(mercado.nome)}')) continue;
+          results.add(mercado);
         }
-        if (!chaves.add('n:${_normalizeName(mercado.nome)}')) continue;
-        results.add(mercado);
       }
     } on MarketServiceException catch (error) {
       localError = error;
@@ -161,7 +162,8 @@ class MarketService {
       }
     }
 
-    if (results.isEmpty && localError != null) {      throw localError;
+    if (results.isEmpty && localError != null) {
+      throw localError;
     }
 
     results.sort((a, b) {
@@ -173,10 +175,16 @@ class MarketService {
     return results.take(limit).toList(growable: false);
   }
 
+  /// Busca por nome ancorada na posição atual.
+  ///
+  /// No modo visitante consulta apenas a TomTom; para utilizadores logados
+  /// combina a base da comunidade com a Places API. [radiusMeters] limita os
+  /// resultados à região real do utilizador.
   Future<List<Mercado>> searchByName(
     String query, {
     double? latitude,
     double? longitude,
+    double radiusMeters = 5000,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return const [];
@@ -185,23 +193,37 @@ class MarketService {
 
     final results = <Mercado>[];
     final chaves = <String>{};
+    // Nome -> distância dos resultados locais, para não duplicar na TomTom
+    // exatamente o mesmo mercado já listado pela comunidade.
+    final nomesLocais = <String, double?>{};
     Object? localError;
 
     try {
-      final local = searcher != null
-          ? await searcher(
-              trimmed,
-              latitude: latitude,
-              longitude: longitude,
-            )
-          : await _searchFromSupabase(
-              trimmed,
-              latitude: latitude,
-              longitude: longitude,
-            );
-      for (final mercado in local) {
-        if (!chaves.add('n:${_normalizeName(mercado.nome)}')) continue;
-        results.add(mercado);
+      if (!_allowRemote) {
+        debugPrint('[MarketService] visitante: busca interna ignorada.');
+      } else {
+        final local = searcher != null
+            ? await searcher(
+                trimmed,
+                latitude: latitude,
+                longitude: longitude,
+                radiusMeters: radiusMeters,
+              )
+            : await _searchFromSupabase(
+                trimmed,
+                latitude: latitude,
+                longitude: longitude,
+              );
+        for (final mercado in local) {
+          // The RPC da comunidade não recebe raio; filtramos aqui para não
+          // mostrar mercados de outra cidade.
+          final distancia = mercado.distanciaMetros;
+          if (distancia != null && distancia > radiusMeters) continue;
+          final nomeNormalizado = _normalizeName(mercado.nome);
+          if (!chaves.add('n:$nomeNormalizado')) continue;
+          nomesLocais.putIfAbsent(nomeNormalizado, () => distancia);
+          results.add(mercado);
+        }
       }
     } catch (error) {
       localError = error;
@@ -214,10 +236,20 @@ class MarketService {
           trimmed,
           latitude: latitude,
           longitude: longitude,
+          radiusMeters: radiusMeters,
         );
         for (final place in places) {
           if (!chaves.add('e:${place.id}')) continue;
-          if (!chaves.add('n:${_normalizeName(place.nome)}')) continue;
+          // Só descarta se for claramente o mesmo mercado local (mesmo nome e
+          // distância parecida). Filiais com o mesmo nome continuam visíveis.
+          final nomeNormalizado = _normalizeName(place.nome);
+          final distanciaLocal = nomesLocais[nomeNormalizado];
+          final distanciaTomTom = place.distanciaMetros;
+          if (distanciaLocal != null &&
+              distanciaTomTom != null &&
+              (distanciaLocal - distanciaTomTom).abs() < 200) {
+            continue;
+          }
           results.add(place.toMercado());
         }
       } catch (error) {
@@ -242,6 +274,9 @@ class MarketService {
     if (externalId == null || externalId.isEmpty) {
       return MarketCreationResult(market);
     }
+
+    // Visitante: nada é enviado para a nuvem.
+    if (!_allowRemote) return MarketCreationResult(market);
 
     if (!SupabaseService.isReady) {
       return MarketCreationResult(market);
@@ -299,6 +334,19 @@ class MarketService {
         neighborhood: neighborhood,
       );
     }
+
+    if (!_allowRemote) {
+      return MarketCreationResult(
+        _localMarket(
+          name: name,
+          latitude: latitude,
+          longitude: longitude,
+          city: city,
+          neighborhood: neighborhood,
+        ),
+      );
+    }
+
     return _createInSupabase(
       name: name,
       latitude: latitude,
@@ -452,6 +500,7 @@ final marketServiceProvider = Provider<MarketService>((ref) {
   return MarketService(
     locationService: ref.watch(locationServiceProvider),
     tomTomService: ref.watch(tomTomServiceProvider),
+    allowRemote: !ref.watch(isGuestProvider),
   );
 });
 

@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/models/mercado.dart';
+import '../../../../core/providers/location_provider.dart';
+import '../../../../core/providers/session_provider.dart';
 import '../../../../core/services/location_service.dart';
 import '../../../../core/theme/app_theme.dart';
 import '../../domain/market_service.dart';
@@ -75,6 +77,9 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
   Timer? _searchDebounce;
   int _searchRequest = 0;
 
+  /// Raio (km) usado tanto na lista de próximos quanto na busca por nome.
+  double _radiusKm = 5;
+
   bool _locating = true;
   bool _loadingNearby = false;
   bool _searching = false;
@@ -85,6 +90,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
 
   LocationAccessResult? _locationResult;
   List<Mercado> _nearby = const [];
+  double? _nearbyRadiusKm;
   List<Mercado> _searchResults = const [];
   Mercado? _exact;
   String? _nearbyError;
@@ -94,7 +100,10 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _detectLocation();
+      if (!mounted) return;
+      // Aproveita uma leitura recente do provider global; o botão de
+      // atualização força uma nova captura de alta precisão.
+      _loadLocation(force: false);
     });
   }
 
@@ -112,7 +121,9 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
 
   bool get _isSearching => _searchController.text.trim().length >= 2;
 
-  Future<void> _detectLocation() async {
+  Future<void> _detectLocation() => _loadLocation(force: true);
+
+  Future<void> _loadLocation({required bool force}) async {
     if (!mounted) return;
     setState(() {
       _locating = true;
@@ -120,9 +131,14 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
       _exact = null;
       _exactRejected = false;
       _nearby = const [];
+      _nearbyRadiusKm = null;
     });
 
-    final result = await _service.resolveLocation(forceRefresh: true);
+    // Fonte única: o provider global faz a leitura de alta precisão e evita
+    // abrir o GPS novamente em cada tela.
+    final result = await ref
+        .read(locationProvider.notifier)
+        .ensureCoordinates(force: force);
     if (!mounted) return;
 
     setState(() {
@@ -187,12 +203,13 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
       final markets = await _service.findNearby(
         latitude: coordinates.latitude,
         longitude: coordinates.longitude,
-        radiusMeters: 5000,
+        radiusMeters: _radiusKm * 1000,
         limit: 20,
       );
       if (!mounted) return;
       setState(() {
         _nearby = markets;
+        _nearbyRadiusKm = _radiusKm;
         _loadingNearby = false;
       });
     } catch (error) {
@@ -204,9 +221,22 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
     }
   }
 
+  void _setRadius(double km) {
+    if (km == _radiusKm) return;
+    setState(() => _radiusKm = km);
+
+    if (_exact == null || _exactRejected) {
+      _loadFallbackMarkets();
+    }
+    if (_isSearching) {
+      _runSearch(_searchController.text.trim());
+    }
+  }
+
   void _rejectExactMatch() {
     setState(() => _exactRejected = true);
-    if (_nearby.isEmpty && !_loadingNearby) {
+    final desatualizado = _nearby.isEmpty || _nearbyRadiusKm != _radiusKm;
+    if (desatualizado && !_loadingNearby) {
       _loadFallbackMarkets();
     }
   }
@@ -244,6 +274,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
         query,
         latitude: _coordinates?.latitude,
         longitude: _coordinates?.longitude,
+        radiusMeters: _radiusKm * 1000,
       );
       if (!mounted || request != _searchRequest) return;
       setState(() {
@@ -439,14 +470,32 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
           else ...[
             if (_locationResult != null && !_locationResult!.hasCoordinates)
               _buildLocationNotice(),
-            if (_coordinates != null) ...[
-              if (_exact != null && !_exactRejected)
-                _ExactMarketCard(
-                  market: _exact!,
-                  onConfirm: () => _selectMarket(_exact!),
-                  onReject: _rejectExactMatch,
-                )
-              else ...[
+            if (_coordinates != null && _exact != null && !_exactRejected)
+              _ExactMarketCard(
+                market: _exact!,
+                onConfirm: () => _selectMarket(_exact!),
+                onReject: _rejectExactMatch,
+              )
+            else ...[
+              // Raio e busca ficam acima da lista para não ficarem escondidos
+              // atrás de vários mercados.
+              _RadiusSelector(
+                selectedKm: _radiusKm,
+                onChanged: _setRadius,
+              ),
+              const SizedBox(height: 12),
+              _SearchField(
+                controller: _searchController,
+                enabled: !_locating,
+                onChanged: _onSearchChanged,
+                onClear: _clearSearch,
+              ),
+              if (_isSearching) ...[
+                const SizedBox(height: 14),
+                _buildSearchResults(),
+              ],
+              if (_coordinates != null) ...[
+                const SizedBox(height: 16),
                 _buildNearbySection(),
                 if (_exactRejected) ...[
                   const SizedBox(height: 10),
@@ -462,17 +511,6 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
                   ),
                 ],
               ],
-            ],
-            const SizedBox(height: 16),
-            _SearchField(
-              controller: _searchController,
-              enabled: !_locating,
-              onChanged: _onSearchChanged,
-              onClear: _clearSearch,
-            ),
-            if (_isSearching) ...[
-              const SizedBox(height: 14),
-              _buildSearchResults(),
             ],
             const SizedBox(height: 16),
             SizedBox(
@@ -648,6 +686,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
   }
 
   Widget _buildNearbySection() {
+    final visitante = ref.watch(isGuestProvider);
     final temResultadosTomTom = _nearby.any(
       (market) => market.externalId?.isNotEmpty ?? false,
     );
@@ -668,12 +707,25 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
               ),
             ),
             Text(
-              'até 5 km',
+              'até ${_radiusKm.toInt()} km',
               style: TextStyle(
                 fontSize: 10.5,
                 fontWeight: FontWeight.w600,
                 color: AppTheme.muted.withValues(alpha: 0.9),
               ),
+            ),
+            const SizedBox(width: 2),
+            IconButton(
+              onPressed: _loadingNearby ? null : _detectLocation,
+              tooltip: 'Atualizar localização',
+              icon: const Icon(
+                Icons.my_location_rounded,
+                size: 17,
+                color: AppTheme.muted,
+              ),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
             ),
           ],
         ),
@@ -686,7 +738,7 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
             onRetry: _loadFallbackMarkets,
           )
         else if (_nearby.isEmpty)
-          const _EmptyNearbyCard()
+          _EmptyNearbyCard(radiusKm: _radiusKm)
         else ...[
           ..._nearby.map(
             (market) => Padding(
@@ -711,8 +763,13 @@ class _MarketSelectionSheetState extends ConsumerState<MarketSelectionSheet> {
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
-                      'Resultados marcados como TomTom vêm da TomTom Places e '
-                      'são adicionados à comunidade ao selecionar.',
+                      visitante
+                          ? 'Resultados marcados como TomTom vêm da TomTom '
+                              'Places. No modo visitante nada é enviado para a '
+                              'comunidade.'
+                          : 'Resultados marcados como TomTom vêm da TomTom '
+                              'Places e são adicionados à comunidade ao '
+                              'selecionar.',
                       style: TextStyle(
                         fontSize: 10,
                         height: 1.3,
@@ -1247,6 +1304,78 @@ class _MarketTile extends StatelessWidget {
   }
 }
 
+class _RadiusSelector extends StatelessWidget {
+  final double selectedKm;
+  final ValueChanged<double> onChanged;
+
+  const _RadiusSelector({
+    required this.selectedKm,
+    required this.onChanged,
+  });
+
+  static const List<double> options = [1, 3, 5, 10];
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.radar_rounded, size: 15, color: AppTheme.muted),
+            const SizedBox(width: 6),
+            const Text(
+              'Raio da busca',
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: AppTheme.muted,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '${selectedKm.toInt()} km',
+              style: const TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w800,
+                color: AppTheme.emeraldDark,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 6,
+          children: options.map((km) {
+            final selected = km == selectedKm;
+            return ChoiceChip(
+              label: Text('${km.toInt()} km'),
+              selected: selected,
+              onSelected: (_) => onChanged(km),
+              showCheckmark: false,
+              visualDensity: VisualDensity.compact,
+              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              labelStyle: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.w700,
+                color: selected ? AppTheme.emeraldDark : AppTheme.muted,
+              ),
+              selectedColor: AppTheme.emeraldTint,
+              backgroundColor: AppTheme.background,
+              side: BorderSide(
+                color: selected
+                    ? AppTheme.emerald.withValues(alpha: 0.5)
+                    : AppTheme.line,
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+}
+
 class _SearchField extends StatelessWidget {
   final TextEditingController controller;
   final bool enabled;
@@ -1367,7 +1496,9 @@ class _NearbyErrorCard extends StatelessWidget {
 }
 
 class _EmptyNearbyCard extends StatelessWidget {
-  const _EmptyNearbyCard();
+  final double radiusKm;
+
+  const _EmptyNearbyCard({required this.radiusKm});
 
   @override
   Widget build(BuildContext context) {
@@ -1379,14 +1510,18 @@ class _EmptyNearbyCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
         border: Border.all(color: AppTheme.line),
       ),
-      child: const Column(
+      child: Column(
         children: [
-          Icon(Icons.store_mall_directory_outlined, color: AppTheme.muted),
-          SizedBox(height: 8),
+          const Icon(
+            Icons.store_mall_directory_outlined,
+            color: AppTheme.muted,
+          ),
+          const SizedBox(height: 8),
           Text(
-            'Nenhum mercado cadastrado num raio de 5 km.',
+            'Nenhum mercado cadastrado num raio de '
+            '${radiusKm.toInt()} km.',
             textAlign: TextAlign.center,
-            style: TextStyle(
+            style: const TextStyle(
               fontSize: 12,
               height: 1.4,
               color: AppTheme.muted,

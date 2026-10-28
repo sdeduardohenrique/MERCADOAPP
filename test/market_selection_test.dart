@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:soma_ai/core/models/mercado.dart';
+import 'package:soma_ai/core/providers/location_provider.dart';
 import 'package:soma_ai/core/services/location_service.dart';
 import 'package:soma_ai/core/theme/app_theme.dart';
 import 'package:soma_ai/features/cart/presentation/active_purchase_screen.dart';
@@ -36,15 +37,12 @@ LocationAccessResult _located() => const LocationAccessResult.success(
     );
 
 MarketService _service({
-  LocationAccessResult? location,
   List<Mercado> exact = const [],
   List<Mercado> nearby = const [],
   List<Mercado> search = const [],
   MarketCreationResult? created,
 }) {
   return MarketService(
-    locationResolver: ({bool forceRefresh = true}) async =>
-        location ?? _located(),
     nearbyFetcher: ({
       required double latitude,
       required double longitude,
@@ -57,6 +55,7 @@ MarketService _service({
       String query, {
       double? latitude,
       double? longitude,
+      double radiusMeters = 5000,
     }) async =>
         search,
     creator: ({
@@ -79,6 +78,31 @@ MarketService _service({
           );
     },
   );
+}
+
+List<Override> _overrides({
+  LocationAccessResult? location,
+  List<Mercado> exact = const [],
+  List<Mercado> nearby = const [],
+  List<Mercado> search = const [],
+  MarketCreationResult? created,
+}) {
+  return [
+    marketServiceProvider.overrideWithValue(
+      _service(
+        exact: exact,
+        nearby: nearby,
+        search: search,
+        created: created,
+      ),
+    ),
+    // Fonte única de localização usada pelo BottomSheet.
+    locationProvider.overrideWith(
+      (ref) => LocationNotifier(
+        resolver: () async => location ?? _located(),
+      ),
+    ),
+  ];
 }
 
 Widget _sheetApp(
@@ -110,11 +134,7 @@ void main() {
   testWidgets('mostra card de match perfeito e seleciona o mercado',
       (tester) async {
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(exact: const [_exactMarket]),
-        ),
-      ],
+      overrides: _overrides(exact: const [_exactMarket]),
     );
     addTearDown(container.dispose);
     MarketSelectionResult? result;
@@ -137,14 +157,9 @@ void main() {
   testWidgets('não estou aqui mostra a lista de mercados num raio maior',
       (tester) async {
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(
-            exact: const [_exactMarket],
-            nearby: const [_exactMarket, _fallbackMarket],
-          ),
-        ),
-      ],
+      overrides: _overrides(
+          exact: const [_exactMarket],
+          nearby: const [_exactMarket, _fallbackMarket]),
     );
     addTearDown(container.dispose);
     MarketSelectionResult? result;
@@ -178,11 +193,7 @@ void main() {
     );
 
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(nearby: const [external]),
-        ),
-      ],
+      overrides: _overrides(nearby: const [external]),
     );
     addTearDown(container.dispose);
     MarketSelectionResult? result;
@@ -204,15 +215,10 @@ void main() {
   testWidgets('GPS negado não bloqueia: cadastro manual sem coordenadas',
       (tester) async {
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(
-            location: const LocationAccessResult.failure(
-              LocationAccessStatus.permissionDenied,
-            ),
-          ),
-        ),
-      ],
+      overrides: _overrides(
+          location: const LocationAccessResult.failure(
+        LocationAccessStatus.permissionDenied,
+      )),
     );
     addTearDown(container.dispose);
     MarketSelectionResult? result;
@@ -242,11 +248,7 @@ void main() {
     tester,
   ) async {
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(exact: const [_exactMarket]),
-        ),
-      ],
+      overrides: _overrides(exact: const [_exactMarket]),
     );
     addTearDown(container.dispose);
     container.read(selectedMarketProvider.notifier).select(_exactMarket);
@@ -269,11 +271,7 @@ void main() {
   testWidgets('Dashboard pede o mercado antes de abrir o carrinho',
       (tester) async {
     final container = ProviderContainer(
-      overrides: [
-        marketServiceProvider.overrideWithValue(
-          _service(exact: const [_exactMarket]),
-        ),
-      ],
+      overrides: _overrides(exact: const [_exactMarket]),
     );
     addTearDown(container.dispose);
 
